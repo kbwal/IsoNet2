@@ -79,7 +79,6 @@ def apply_wedge(ori_data, ld1 = 1, ld2 =0, mw3d = None):
         outData=np.rot90(outData, k=3, axes=(0,1))
         return outData
     else:
-
         mw = mw3d
         mw = np.fft.fftshift(mw)
         mw = mw * ld1 + (1-mw) * ld2

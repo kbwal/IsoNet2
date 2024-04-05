@@ -703,25 +703,31 @@ class ISONET:
         from IsoNet.bin.wedge import get_F_wedge
         get_F_wedge(diameter, wedge_angle)
 
-    def reconstruct_psf(self,size=128,tilt_file=None,w=2, output="wedge.mrc"):
+    def reconstruct_psf(self,size=128,tilt_file=None,w=8, output="wedge.mrc",between_tilts=False):
         import numpy as np
         
-        if tilt_file is None:
+        if tilt_file is None or tilt_file == 'None':
             tilt = np.linspace(-60,60,121)
             np.savetxt("tmp.tlt", tilt, fmt="%.02f")
             tilt_file = "tmp.tlt"
-        
-        from IsoNet.util.geometry import draw_a_line
+
         tilt = np.loadtxt(tilt_file)
-        out_mat = np.zeros([size,size], dtype = np.float32)
-        for angle in tilt:
-            out_mat = draw_a_line(out_mat, angle, w)
-        out_mat = np.repeat(out_mat[:, np.newaxis, :], size, axis=1)
+        if between_tilts:
+            from IsoNet.util.geometry import draw_a_line
+            out_mat = np.zeros([size,size], dtype = np.float32)
+            for angle in tilt:
+                out_mat = draw_a_line(out_mat, -angle, w)
+            out_mat = np.repeat(out_mat[:, np.newaxis, :], size, axis=1)
+        else:
+            from IsoNet.util.missing_wedge import get_F_wedge
+            max_angle = np.max(tilt)
+            min_angle = np.min(tilt)
+            out_mat = get_F_wedge(size=size, angle=60)
         import mrcfile
         with mrcfile.new(output, overwrite=True) as mrc:
             mrc.set_data(out_mat)
 
-    def prepare_star(self, folder_name, folder2_name=None,tilt_folder=None, output_star='tomograms.star',pixel_size = 10.0, defocus = 0.0, number_subtomos = 100):
+    def prepare_star(self, folder_name, output_star='tomograms.star',pixel_size = 10.0, defocus = 0.0, number_subtomos = 100):
         """
         \nThis command generates a tomograms.star file from a folder containing only tomogram files (.mrc or .rec).\n
         isonet.py prepare_star folder_name [--output_star] [--pixel_size] [--defocus] [--number_subtomos]
@@ -739,27 +745,38 @@ class ISONET:
         import pandas as pd
         
         tomo_list = sorted(os.listdir(folder_name))
+        print(tomo_list)
         data = []
-        label = ['rlnIndex','rlnTomogramName']
-        if folder2_name is not None:
-            label.append('rlnTomogram2Name')
-        if tilt_folder is not None:
-            label.append('rlnTiltFile')
+        label = ['rlnIndex','rlnTomogramName','rlnTomogram2Name','rlnTiltFile']
+
 
         for i,tomo_name in enumerate(tomo_list):
             tomo_path = os.path.join(folder_name,tomo_name)
-            data_row = [i+1,tomo_path]
-            if folder2_name is not None:
-                tomo2_path = os.path.join(folder2_name, tomo_name)
-                data_row.append(tomo2_path)
-            if tilt_folder is not None:
-                tilt_path = os.path.join(tilt_folder, os.path.splitext(tomo_name)[0]+'.tlt')
-                data_row.append(tilt_path)
-            data.append(data_row)
+            files=os.listdir(tomo_path)
+            tomo_file = []
+            tilt_file = "None"
+            for item in files:
+                item_path = os.path.join(tomo_path,item)
+                if item[-4:]=='.mrc' or item[-4:]=='.rec':
+                    tomo_file.append(item_path)
+                if item[-3:]=='tlt' or item[-3:]=='.tlt':
+                    tilt_file = item_path
+            if len(tomo_file) == 2:
+                data.append([i, tomo_file[0], tomo_file[1],tilt_file])
+            elif len(tomo_file) == 1:
+                data.append([i, tomo_file[0], "None", tilt_file])                
+            #data_row = [i+1,tomo_path]
+            #if folder2_name is not None:
+            #    tomo2_path = os.path.join(folder2_name, tomo_name)
+            #    data_row.append(tomo2_path)
+            #if tilt_folder is not None:
+            #    tilt_path = os.path.join(tilt_folder, os.path.splitext(tomo_name)[0]+'.tlt')
+            #    data_row.append(tilt_path)
+            #data.append(data_row)
         df = pd.DataFrame(data, columns = label)
         starfile.write(df,output_star)
 
-    def extract(self,  star, subtomo_folder="subtomos", cube_size=128, crop_size=None):
+    def extract(self,  star, subtomo_folder="subtomos", between_tilts=False, cube_size=128, crop_size=None):
 
         if crop_size is None:
             crop_size = cube_size + 16
@@ -796,9 +813,9 @@ class ISONET:
             wedge_path = os.path.join(subtomo_folder, tomo_folder, 'wedge.mrc')
             if "rlnTiltFile" in list(df.columns):
                 print(wedge_path)
-                self.reconstruct_psf(size=128, tilt_file=row["rlnTiltFile"], output=wedge_path)
+                self.reconstruct_psf(size=128, tilt_file=row["rlnTiltFile"], output=wedge_path, between_tilts=between_tilts)
             else:
-                self.reconstruct_psf(size=128, output=wedge_path)
+                self.reconstruct_psf(size=128, output=wedge_path, between_tilts=between_tilts)
 
             for i in range(n_subtomo_per_tomo):
                 im_name1 = '{}/subvolume{}_{:0>6d}.mrc'.format(even_folder, '', i)

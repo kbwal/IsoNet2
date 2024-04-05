@@ -15,13 +15,20 @@ def mkfolder(folder, remove=True):
             logging.info(f"The {folder} folder already exists, outputs will write into this folder")
 
 
+import mrcfile
+def debug_matrix(mat, filename='debug.mrc'):
+    print(mat.type())
+    out_mat = mat.cpu().numpy().squeeze()
+    with mrcfile.new(filename, overwrite=True) as mrc:
+        mrc.set_data(out_mat)
+
 def process_gpuID(gpuID):
 
     if type(gpuID) == str:
         gpuID_list = list(set(gpuID.split(',')))
         gpuID_list = list(map(int,gpuID_list))
         ngpus = len(gpuID_list)
-
+ 
     elif type(gpuID) == tuple or type(gpuID) == list:
         gpuID_list = gpuID
         ngpus = len(gpuID)

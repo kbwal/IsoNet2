@@ -14,7 +14,7 @@ from tqdm import tqdm
 import socket
 import copy
 import random
-
+from IsoNet.util.utils import debug_matrix
 import torch.multiprocessing as mp
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -249,6 +249,9 @@ def ddp_simple_n2n(rank, world_size, port_number, model,alpha, beta, data_path, 
             average_loss = torch.tensor(0, dtype=torch.float).to(rank)
             for i, batch in enumerate(train_loader):
                 x1, x2, mw = batch
+                # debug_matrix(x1, 'x1.mrc')
+                # debug_matrix(x2, 'x2.mrc')
+                # debug_matrix(mw, 'mw.mrc')
                 x1 = x1.cuda()
                 x2 = x2.cuda()
                 mw = mw.cuda()
@@ -300,6 +303,7 @@ def ddp_simple_n2n(rank, world_size, port_number, model,alpha, beta, data_path, 
                 if i + 1 >= steps_per_epoch_train*acc_batches:
                     break
             average_loss = average_loss / (i+1.)
+
                                       
         dist.barrier()
         dist.reduce(average_loss, dst=0)
