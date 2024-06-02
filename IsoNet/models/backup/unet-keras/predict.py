@@ -7,7 +7,7 @@ from IsoNet.preprocessing.img_processing import normalize
 import numpy as np
 import tensorflow.keras.backend as K
 import os
-from IsoNet.util.toTile import reform3D
+from IsoNet.utils.toTile import reform3D
 from tqdm import tqdm
 import sys
 

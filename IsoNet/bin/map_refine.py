@@ -4,12 +4,12 @@ from IsoNet.preprocessing.cubes import create_cube_seeds,crop_cubes
 import mrcfile
 from multiprocessing import Pool
 from functools import partial
-from IsoNet.util.utils import mkfolder
+from IsoNet.utils.utils import mkfolder
 import skimage
 from IsoNet.preprocessing.img_processing import normalize
 import os
 import sys
-from IsoNet.util.plot_metrics import plot_metrics
+from IsoNet.utils.plot_metrics import plot_metrics
 import shutil
        
 def rescale_fsc(fsc3d, crop_size):
@@ -40,7 +40,7 @@ def map_refine(halfmap, mask, fsc3d, alpha, voxel_size, epochs = 10, mixed_preci
     fsc3d_cube_small = rescale_fsc(fsc3d, cube_size)
 
     if limit_res is not None:
-        from IsoNet.util.FSC import lowpass
+        from IsoNet.utils.FSC import lowpass
         logging.info(f"IsoNet correction until resolution {limit_res}A!\n\
                      Information beyond {limit_res}A remains unchanged")
         halfmap = lowpass(halfmap, limit_res, voxel_size)
@@ -102,7 +102,7 @@ def map_refine_n2n(halfmap1, halfmap2, mask, fsc3d, alpha, beta, voxel_size, epo
             output_base0 += output_base1[count]
 
     if limit_res is not None:
-        from IsoNet.util.FSC import lowpass
+        from IsoNet.utils.FSC import lowpass
         logging.info(f"IsoNet correction until resolution {limit_res}A!\n\
                      Information beyond {limit_res}A remains unchanged")
         halfmap1 = lowpass(halfmap1, limit_res, voxel_size)

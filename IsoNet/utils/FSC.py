@@ -59,7 +59,7 @@ def recommended_resolution(fsc3d, voxel_size, threshold = 0.143):
     return 2 * voxel_size
 
 def combine_map_F(low_data, high_data, threshold_res, voxel_size, mask_data=None):
-    from IsoNet.util.FSC import get_sphere,apply_F_filter,match_spectrum
+    from IsoNet.utils.FSC import get_sphere,apply_F_filter,match_spectrum
 
     if isinstance(mask_data,np.ndarray):
         low_data = match_spectrum(low_data, high_data,mask_data)
@@ -288,7 +288,7 @@ def ThreeD_FSC(FSC_map, limit_r=None, angle=20, n_processes=16):
     return out
 
 def filter_weight(h_map, fsc3d, low_r, high_r):
-    from IsoNet.util.FSC import get_donut
+    from IsoNet.utils.FSC import get_donut
     from numpy.fft import fftshift,fftn,ifftn
     import numpy as np
     mask_donut = get_donut(h_map.shape[0], int(low_r), int(high_r))
@@ -321,7 +321,7 @@ def filter_weight(h_map, fsc3d, low_r, high_r):
     return in_donut + out_donut
 
 def fsc_matching(h_target, h_source, fsc3d, low_r, high_r):
-    from IsoNet.util.FSC import get_donut
+    from IsoNet.utils.FSC import get_donut
     from numpy.fft import fftshift,fftn,ifftn
     import numpy as np
     mask_donut = get_donut(h_target.shape[0], int(low_r), int(high_r))
@@ -356,7 +356,7 @@ def fsc_matching(h_target, h_source, fsc3d, low_r, high_r):
 
 def angular_whitening(in_map, voxel_size,resolution_initial, limit_resolution):
     from numpy.fft import fftn,fftshift,ifftn
-    from IsoNet.util.FSC import apply_F_filter
+    from IsoNet.utils.FSC import apply_F_filter
     import numpy as np
     import skimage
 

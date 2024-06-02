@@ -8,13 +8,13 @@ import mrcfile
 from IsoNet.preprocessing.img_processing import normalize
 import torch.nn as nn
 import logging
-from IsoNet.util.toTile import reform3D
+from IsoNet.utils.toTile import reform3D
 import sys
 from tqdm import tqdm
 import socket
 import copy
 import random
-from IsoNet.util.utils import debug_matrix
+from IsoNet.utils.utils import debug_matrix
 import torch.multiprocessing as mp
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP

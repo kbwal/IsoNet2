@@ -8,7 +8,7 @@ import mrcfile
 from IsoNet.preprocessing.img_processing import normalize
 import torch.nn as nn
 import logging
-from IsoNet.util.toTile import reform3D
+from IsoNet.utils.toTile import reform3D
 import sys
 from tqdm import tqdm
 import socket
