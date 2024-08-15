@@ -727,9 +727,19 @@ class ISONET:
         with mrcfile.new(output, overwrite=True) as mrc:
             mrc.set_data(out_mat)
 
-    def prepare_star(self, folder_name, output_star='tomograms.star',pixel_size = 10.0, defocus = 0.0, number_subtomos = 100):
+    def prepare_star(self, tomo_folder="None",
+                     even_folder="None",
+                     odd_folder="None",
+                     tilt_folder="None",
+                     output_star='tomograms.star',
+                     pixel_size = 10.0, defocus = 0.0, 
+                     number_subtomos = 100):
         """
-        \nThis command generates a tomograms.star file from a folder containing only tomogram files (.mrc or .rec).\n
+        \n
+        If there is no evn odd seperation, please specify tomo_folder
+        If you have even and odd tomograms, please use the even_folder and odd_folder parameters
+        
+        This command generates a tomograms.star file from a folder containing only tomogram files (.mrc or .rec).\n
         isonet.py prepare_star folder_name [--output_star] [--pixel_size] [--defocus] [--number_subtomos]
         :param folder_name: (None) directory containing tomogram(s). Usually 1-5 tomograms are sufficient.
         :param output_star: (tomograms.star) star file similar to that from "relion". You can modify this file manually or with gui.
@@ -743,37 +753,30 @@ class ISONET:
         """
         import starfile
         import pandas as pd
+        import numpy as np
         
-        tomo_list = sorted(os.listdir(folder_name))
-        print(tomo_list)
         data = []
-        label = ['rlnIndex','rlnTomogramName','rlnTomogram2Name','rlnTiltFile']
-
-
-        for i,tomo_name in enumerate(tomo_list):
-            tomo_path = os.path.join(folder_name,tomo_name)
-            files=os.listdir(tomo_path)
-            tomo_file = []
-            tilt_file = "None"
-            for item in files:
-                item_path = os.path.join(tomo_path,item)
-                if item[-4:]=='.mrc' or item[-4:]=='.rec':
-                    tomo_file.append(item_path)
-                if item[-3:]=='tlt' or item[-3:]=='.tlt':
-                    tilt_file = item_path
-            if len(tomo_file) == 2:
-                data.append([i, tomo_file[0], tomo_file[1],tilt_file])
-            elif len(tomo_file) == 1:
-                data.append([i, tomo_file[0], "None", tilt_file])                
-            #data_row = [i+1,tomo_path]
-            #if folder2_name is not None:
-            #    tomo2_path = os.path.join(folder2_name, tomo_name)
-            #    data_row.append(tomo2_path)
-            #if tilt_folder is not None:
-            #    tilt_path = os.path.join(tilt_folder, os.path.splitext(tomo_name)[0]+'.tlt')
-            #    data_row.append(tilt_path)
-            #data.append(data_row)
-        df = pd.DataFrame(data, columns = label)
+        label = []
+        if tomo_folder != "None":
+            tomograms_files = sorted(os.listdir(tomo_folder))
+            data.append(tomograms_files)
+            label += ['rlnTomoName']
+        if even_folder != "None":
+            even_files = sorted(os.listdir(even_folder))
+            label += ['rlnTomoReconstructedTomogramHalf1']
+            data.append(even_files)
+        if odd_folder != "None":
+            odd_files = sorted(os.listdir(odd_folder))
+            label += ['rlnTomoReconstructedTomogramHalf2']
+            data.append(odd_files)
+        if tilt_folder != "None":
+            tilt_files = sorted(os.listdir(tilt_folder))
+            label += ['rlnTiltFile']
+            data.append(tilt_files)
+        data_length = len(data[0])
+        data = list(map(list, zip(*data)))
+        df = pd.DataFrame(data = data, columns = label)
+        df.insert(0, 'rlnIndex', np.arange(data_length)+1)
         starfile.write(df,output_star)
 
     def extract(self,  star, subtomo_folder="subtomos", between_tilts=False, cube_size=128, crop_size=None):
