@@ -24,7 +24,6 @@ class ISONET:
     ISONET: Train on tomograms and restore missing-wedge\n
     for detail discription, run one of the following commands:
 
-    IsoNet.py fsc3d -h
     IsoNet.py refine -h
     """
     def denoise(self, 
@@ -69,6 +68,83 @@ class ISONET:
                     crop_size=crop_size,tomo_type=0, out_type = 5,
                     batch_size = batch_size,normalize_percentile=False,
                     log_level="info", tomo_idx=None)
+
+
+    def prepare_star(self, full_folder="None",
+                     even_folder="None",
+                     odd_folder="None",
+                     tilt_file_folder="None",
+                     mask_folder='None',
+                     coordinate_folder='None',
+                     n_subtomo = 300,
+                     output_star='tomograms.star',
+                     pixel_size = 10.0, defocus = 0.0, 
+                     number_subtomos = 100):
+        """
+        \n
+        If there is no evn odd seperation, please specify tomo_folder
+        If you have even and odd tomograms, please use the even_folder and odd_folder parameters
+        
+        This command generates a tomograms.star file from a folder containing only tomogram files (.mrc or .rec).\n
+        isonet.py prepare_star folder_name [--output_star] [--pixel_size] [--defocus] [--number_subtomos]
+        :param folder_name: (None) directory containing tomogram(s). Usually 1-5 tomograms are sufficient.
+        :param output_star: (tomograms.star) star file similar to that from "relion". You can modify this file manually or with gui.
+        :param pixel_size: (10) pixel size in angstroms. Usually you want to bin your tomograms to about 10A pixel size.
+        Too large or too small pixel sizes are not recommended, since the target resolution on Z-axis of corrected tomograms should be about 30A.
+        :param defocus: (0.0) defocus in Angstrom. Only need for ctf deconvolution. For phase plate data, you can leave defocus 0.
+        If you have multiple tomograms with different defocus, please modify them in star file or with gui.
+        :param number_subtomos: (100) Number of subtomograms to be extracted in later processes.
+        If you want to extract different number of subtomograms in different tomograms, you can modify them in the star file generated with this command or with gui.
+
+        """
+        import starfile
+        import pandas as pd
+        import numpy as np
+        
+        data = []
+        label = []
+        if full_folder != "None":
+            tomograms_files = sorted(os.listdir(full_folder))
+            tomograms_files = [f"{full_folder}/{item}" for item in tomograms_files]
+            data.append(tomograms_files)
+            label += ['rlnTomoName']
+        if even_folder != "None":
+            even_files = sorted(os.listdir(even_folder))
+            label += ['rlnTomoReconstructedTomogramHalf1']
+            even_files = [f"{even_folder}/{item}" for item in even_files]
+            data.append(even_files)
+        if odd_folder != "None":
+            odd_files = sorted(os.listdir(odd_folder))
+            label += ['rlnTomoReconstructedTomogramHalf2']
+            odd_files = [f"{odd_folder}/{item}" for item in odd_files]
+            data.append(odd_files)
+        if tilt_file_folder != "None":
+            tilt_files = sorted(os.listdir(tilt_file_folder))
+            tilt_files = [f"{tilt_file_folder}/{item}" for item in tilt_files]
+            label += ['rlnTiltFile']
+            data.append(tilt_files)
+        if mask_folder != "None":
+            mask_files = sorted(os.listdir(mask_folder))
+            mask_files = [f"{mask_folder}/{item}" for item in mask_files]
+            label += ['rlnMaskName']
+            data.append(mask_files)
+        if coordinate_folder != "None":
+            coordinate_files = sorted(os.listdir(coordinate_folder))
+            coordinate_files = [f"{coordinate_folder}/{item}" for item in coordinate_files]
+            # TODO read each coordinate file and add _rlnCoordinateX, Y, Z
+        
+        #TODO defocus file folder 
+        from IsoNet.util.fileio import read_defocus_file
+        #TODO decide the defocus file format from CTFFIND and GCTF
+        
+        label += ['rlnNumberSubtomo']
+        data.append([n_subtomo]*len(tomograms_files))
+
+        data_length = len(data[0])
+        data = list(map(list, zip(*data)))
+        df = pd.DataFrame(data = data, columns = label)
+        df.insert(0, 'rlnIndex', np.arange(data_length)+1)
+        starfile.write(df,output_star)
 
     def refine(self, 
                    star_file: str,
@@ -116,19 +192,18 @@ class ISONET:
         :param learning_rate: learning rate. Default learning rate is 3e-4 while previous IsoNet tomography used 3e-4 as learning rate
         """
 
-        from IsoNet.preprocessing.prepare import get_cubes_list
-        from IsoNet.bin.refine import run_training
+        from IsoNet.preprocessing.img_processing import normalize
+        from IsoNet.bin.map_refine import map_refine, map_refine_n2n
+        from IsoNet.util.utils import process_gpuID, process_ncpus, process_batch_size, mkfolder
+        import mrcfile
+        import numpy as np
+
         logging.basicConfig(format='%(asctime)s, %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s'
             ,datefmt="%H:%M:%S",level=logging.DEBUG,handlers=[logging.StreamHandler(sys.stdout)])   
         
-        ngpus, gpuID, gpuID_list = parse_gpu(gpuID)
-        ncpus = parse_cpu(ncpus)
-
-        if batch_size is None:
-            if ngpus == 1:
-                batch_size = 4
-            else:
-                batch_size = 2 * len(gpuID_list)
+        ngpus, gpuID, gpuID_list = process_gpuID(gpuID)
+        ncpus = process_ncpus(ncpus)
+        batch_size = process_batch_size(batch_size, ngpus)
         
         mkfolder(output_dir,remove=False)
         data_list = self.extract(star_file, subtomo_folder=f'{output_dir}/iter000', 
@@ -190,10 +265,8 @@ class ISONET:
         return star
 
 
-    def predict(self, star_file: str, model: str, output_dir: str='./corrected_tomos', 
-                gpuID: str = None, cube_size:int=96, out_type = 4,
-                crop_size:int=128, tomo_type = 1, batch_size:int=None,
-                normalize_percentile: bool=True,log_level: str="info", tomo_idx=None):
+    def predict(self, star_file: str, model: str, output_dir: str='./corrected_tomos', gpuID: str = None, cube_size:int=64,
+    crop_size:int=96,use_deconv_tomo=True, batch_size:int=None,normalize_percentile: bool=True,log_level: str="info", tomo_idx=None):
         """
         \nPredict tomograms using trained model\n
         isonet.py predict star_file model [--gpuID] [--output_dir] [--cube_size] [--crop_size] [--batch_size] [--tomo_idx]
@@ -643,6 +716,10 @@ class ISONET:
         #     f.write(error_text)
         #     f.close()
         #     logging.error(error_text)
+            # with mrcfile.new(f"{output_dir}/corrected_{file_name}.mrc") as mrc:
+            #     mrc.set_data(outData)
+
+
 
     def check(self):
         logging.basicConfig(format='%(asctime)s, %(levelname)-8s %(message)s',
