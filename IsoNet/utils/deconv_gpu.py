@@ -15,7 +15,7 @@ def tom_ctf1d(pixelsize, voltage, cs, defocus, amplitude, phaseshift, bfactor, l
     points = points.astype(np.float)
     points = points/(2 * length)*ny
 
-    k2 = points**2
+    k2 = points**2;
     term1 = lambda1**3 * cs * k2**2
 
     w = np.pi / 2 * (term1 + lambda2 * defocus * k2) - phaseshift
@@ -34,7 +34,7 @@ def wiener1d(angpix, defocus, snrfalloff, deconvstrength, highpassnyquist, phase
 
     snr = np.exp(-data * snrfalloff * 100 / angpix) * (10^(3 * deconvstrength)) * highpass
     #snr[0] = -1
-    ctf = tom_ctf1d(angpix*1e-10, 300e3, 2.7e-3, -defocus*1e-6, 0.07, phaseshift / 180 * np.pi, 0);
+    ctf = ctf1d(angpix*1e-10, 300e3, 2.7e-3, -defocus*1e-6, 0.07, phaseshift / 180 * np.pi, 0);
     if phaseflipped:
         ctf = abs(ctf)
 
@@ -51,7 +51,7 @@ def tom_deconv_tomo(inp, angpix, defocus, snrfalloff, deconvstrength, highpassny
     eps = 1e-10
     snr = np.exp(-data * snrfalloff * 100 / angpix) * np.power(10.0,(3.0 * deconvstrength)) * highpass + eps 
     #snr[0] = -1
-    ctf = tom_ctf1d(angpix*1e-10, 300e3, 2.7e-3, -defocus*1e-6, 0.07, phaseshift / 180 * np.pi, 0)
+    ctf = ctf1d(angpix*1e-10, 300e3, 2.7e-3, -defocus*1e-6, 0.07, phaseshift / 180 * np.pi, 0)
     if phaseflipped:
         ctf = abs(ctf)
 
