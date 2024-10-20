@@ -78,6 +78,13 @@ def mw2D(dim,missingAngle=[30,30]):
     #norm_save('mw.tif',self._mw)
     return mw
 
+
+def mw3D(dim,missingAngle=[30,30]):
+    mw = mw2D(dim,missingAngle)
+
+    mw = np.repeat(mw[:,np.newaxis,:], dim, axis=1).astype(np.float32)
+    return mw
+
 # def apply(data, F):
 #     mw = F
 #     mw = np.fft.fftshift(mw)
@@ -115,7 +122,11 @@ def mw2D(dim,missingAngle=[30,30]):
 #             data[i] = np.real(inv).astype(np.float32)
 #     return data
 
-def apply_wedge(ori_data, mw, ld1 = 1, ld2 =0):
+def apply_wedge(ori_data, mw=None, ld1 = 1, ld2 =0):
+    if mw is None:
+        mw = mw3D(ori_data.shape[-1])
+    # with mrcfile.new('test.mrc', overwrite=True) as mrc:
+    #     mrc.set_data(mw)
     mw = np.fft.fftshift(mw)
     mw = mw * ld1 + (1-mw) * ld2
     f_data = np.fft.fftn(ori_data)
