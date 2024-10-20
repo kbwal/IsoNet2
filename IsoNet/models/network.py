@@ -28,8 +28,6 @@ def find_unused_port():
     sock.close()
     return port
 
-from .masked_loss import masked_loss
-
 def ddp_train(rank, world_size, port_number, model, data_path, batch_size, acc_batches, epochs, steps_per_epoch, learning_rate, mixed_precision, model_path, fsc3d):
     
     os.environ["MASTER_ADDR"] = "localhost"

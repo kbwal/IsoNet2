@@ -10,10 +10,6 @@ from multiprocessing import Pool
 import numpy as np
 from functools import partial
 from IsoNet.utils.rotations import rotation_list
-# from difflib import get_close_matches
-#Make a new folder. If exist, nenew it
-# Do not set basic config for logging here
-# logging.basicConfig(format='%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s',datefmt="%H:%M:%S",level=logging.DEBUG)
 
 
 def combine_volumes(vin, vout, wedge, normalize_percentile=False):
@@ -81,7 +77,7 @@ def get_cubes(inp):
         #     with mrcfile.new('{}/train_y2/y_{}.mrc'.format(data_dir, start+i), overwrite=True) as output_mrc:
         #         output_mrc.set_data(rot_cube2[i].astype(np.float32))
 
-def get_cubes_list(star, data_dir, ncpus, start_over=False):
+def get_cubes_list(star, data_dir, ncpus, start_over=False, wedge_list=False):
     '''
     generate new training dataset:
     map function 'get_cubes' to mrc_list from subtomo_dir
@@ -119,46 +115,47 @@ def get_cubes_list(star, data_dir, ncpus, start_over=False):
             get_cubes(i)
 
 
-# def get_noise_level(noise_level_tuple,noise_start_iter_tuple,iterations):
-#     assert len(noise_level_tuple) == len(noise_start_iter_tuple) and type(noise_level_tuple) in [tuple,list]
-#     noise_level = np.zeros(iterations+1)
-#     for i in range(len(noise_start_iter_tuple)-1):
-#         #remove this assert because it may not be necessary, and cause problem when iterations <3
-#         #assert i < iterations and noise_start_iter_tuple[i]< noise_start_iter_tuple[i+1]
-#         noise_level[noise_start_iter_tuple[i]:noise_start_iter_tuple[i+1]] = noise_level_tuple[i]
-#     assert noise_level_tuple[-1] < iterations 
-#     noise_level[noise_start_iter_tuple[-1]:] = noise_level_tuple[-1]
-#     return noise_level
+def get_noise_level(noise_level_tuple,noise_start_iter_tuple,iterations):
+    assert len(noise_level_tuple) == len(noise_start_iter_tuple) and type(noise_level_tuple) in [tuple,list]
+    noise_level = np.zeros(iterations+1)
+    for i in range(len(noise_start_iter_tuple)-1):
+        #remove this assert because it may not be necessary, and cause problem when iterations <3
+        #assert i < iterations and noise_start_iter_tuple[i]< noise_start_iter_tuple[i+1]
+        noise_level[noise_start_iter_tuple[i]:noise_start_iter_tuple[i+1]] = noise_level_tuple[i]
+    assert noise_level_tuple[-1] < iterations 
+    noise_level[noise_start_iter_tuple[-1]:] = noise_level_tuple[-1]
+    return noise_level
 
-# def generate_first_iter_mrc(mrc,settings):
-#     '''
-#     Apply mw to the mrc and save as xx_iter00.xx
-#     '''
-#     # with mrcfile.open("fouriermask.mrc",'r') as mrcmask:
-#     root_name = mrc.split('/')[-1].split('.')[0]
-#     extension = mrc.split('/')[-1].split('.')[1]
-#     with mrcfile.open(mrc) as mrcData:
-#         orig_data = normalize(mrcData.data.astype(np.float32)*-1, percentile = settings.normalize_percentile)
+def generate_first_iter_mrc(mrc,settings):
+    '''
+    Apply mw to the mrc and save as xx_iter00.xx
+    '''
+    # with mrcfile.open("fouriermask.mrc",'r') as mrcmask:
+    root_name = mrc.split('/')[-1].split('.')[0]
+    extension = mrc.split('/')[-1].split('.')[1]
+    with mrcfile.open(mrc) as mrcData:
+        orig_data = normalize(mrcData.data.astype(np.float32)*-1, percentile = settings.normalize_percentile)
 
-#     orig_data = apply_wedge(orig_data, ld1=1, ld2=0)
+    orig_data = apply_wedge(orig_data, ld1=1, ld2=0)
     
-#     #prefill = True
-#     if settings.prefill==True:
-#         rot_data = np.rot90(orig_data, axes=(0,2))
-#         rot_data = apply_wedge(rot_data, ld1=0, ld2=1)
-#         orig_data = rot_data + orig_data
+    #prefill = True
+    # if settings.prefill==True:
+    #     rot_data = np.rot90(orig_data, axes=(0,2))
+    #     rot_data = apply_wedge(rot_data, ld1=0, ld2=1)
+    #     orig_data = rot_data + orig_data
 
-#     orig_data = normalize(orig_data, percentile = settings.normalize_percentile)
-#     with mrcfile.new('{}/{}_iter00.{}'.format(settings.result_dir,root_name, extension), overwrite=True) as output_mrc:
-#         output_mrc.set_data(-orig_data)
+    #TODO this normalize was removed necessary
+    #orig_data = normalize(orig_data, percentile = settings.normalize_percentile)
+    with mrcfile.new('{}/{}_iter00.{}'.format(settings.output_dir,root_name, extension), overwrite=True) as output_mrc:
+        output_mrc.set_data(-orig_data)
 
-# def prepare_first_iter(settings):
-#     if settings.ncpus >1:
-#         with Pool(settings.ncpus) as p:
-#             func = partial(generate_first_iter_mrc, settings=settings)
-#             p.map(func, settings.mrc_list)
-#     else:
-#         for i in settings.mrc_list:
-#             generate_first_iter_mrc(i,settings)
-#     return settings
+def prepare_first_iter(settings):
+    if settings.ncpus >1:
+        with Pool(settings.ncpus) as p:
+            func = partial(generate_first_iter_mrc, settings=settings)
+            p.map(func, settings.mrc_list)
+    else:
+        for i in settings.mrc_list:
+            generate_first_iter_mrc(i,settings)
+    return settings
 

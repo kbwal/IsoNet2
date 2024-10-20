@@ -68,8 +68,6 @@ def fake_3DCTF_2(ctf2d, angles, repeats = 100):
     result = np.average(results, axis=0)
     return result
 
-
-
 if __name__ == '__main__':
     ctf2d = get_ctf2d(10,300,2.7, 8, 0.1, 0, 0, 128)
     ctf2d = np.tile(ctf2d, (41,1,1))

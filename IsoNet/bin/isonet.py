@@ -26,49 +26,6 @@ class ISONET:
 
     IsoNet.py refine -h
     """
-    def denoise(self, 
-                   star_file: str,
-                   gpuID: str=None,
-
-                   ncpus: int=16, 
-                   output_dir: str="isonet_maps",
-                   pretrained_model: str=None,
-
-                   epochs: int=50,
-                   cube_size: int=128,
-                   crop_size: int=None,
-                   batch_size: int=None, 
-                   acc_batches: int=1,
-                   learning_rate: float=3e-4
-                   ):
-        
-        if crop_size is None:
-            crop_size = cube_size + 16
-
-        ngpus, gpuID, gpuID_list=parse_gpu(gpuID)
-
-        if batch_size is None:
-            if ngpus == 1:
-                batch_size = 4
-            else:
-                batch_size = 2 * len(gpuID_list)
-
-        # extract subtomograms
-        data_list = self.extract(star_file, subtomo_folder=output_dir+"/subtomos", 
-                between_tilts=False, random=False, cube_size=cube_size, crop_size=cube_size, 
-                )
-        # noise2noise training
-        from IsoNet.bin.refine import run_training
-        run_training([data_list[0] + data_list[1],data_list[1] + data_list[0]], epochs = epochs, mixed_precision = False,
-                output_dir = output_dir, outmodel_path=f"{output_dir}/n2n.pt", pretrained_model=pretrained_model,
-                ncpus=16, batch_size = batch_size, acc_batches=acc_batches, learning_rate= learning_rate)
-        # noise2noise prediction
-        self.predict(star_file, model=output_dir+"/n2n.pt", output_dir=output_dir, 
-                    gpuID = gpuID, cube_size=cube_size,
-                    crop_size=crop_size,tomo_type=0, out_type = 5,
-                    batch_size = batch_size,normalize_percentile=False,
-                    log_level="info", tomo_idx=None)
-
 
     def prepare_star(self, full_folder="None",
                      even_folder="None",
@@ -78,7 +35,8 @@ class ISONET:
                      coordinate_folder='None',
                      n_subtomo = 300,
                      output_star='tomograms.star',
-                     pixel_size = 10.0, defocus = 0.0, 
+                     pixel_size = 10.0, 
+                     defocus_folder="None",
                      number_subtomos = 100):
         """
         \n
@@ -99,54 +57,363 @@ class ISONET:
         """
         import starfile
         import pandas as pd
-        import numpy as np
         
+        if full_folder == "None":
+            count_folder = even_folder
+        else:
+            count_folder = full_folder
+        num_tomo = len(os.listdir(count_folder))
+        print("number of tomograms", num_tomo)
+
+
         data = []
         label = []
-        if full_folder != "None":
-            tomograms_files = sorted(os.listdir(full_folder))
-            tomograms_files = [f"{full_folder}/{item}" for item in tomograms_files]
-            data.append(tomograms_files)
-            label += ['rlnTomoName']
-        if even_folder != "None":
-            even_files = sorted(os.listdir(even_folder))
-            label += ['rlnTomoReconstructedTomogramHalf1']
-            even_files = [f"{even_folder}/{item}" for item in even_files]
-            data.append(even_files)
-        if odd_folder != "None":
-            odd_files = sorted(os.listdir(odd_folder))
-            label += ['rlnTomoReconstructedTomogramHalf2']
-            odd_files = [f"{odd_folder}/{item}" for item in odd_files]
-            data.append(odd_files)
-        if tilt_file_folder != "None":
-            tilt_files = sorted(os.listdir(tilt_file_folder))
-            tilt_files = [f"{tilt_file_folder}/{item}" for item in tilt_files]
-            label += ['rlnTiltFile']
-            data.append(tilt_files)
-        if mask_folder != "None":
-            mask_files = sorted(os.listdir(mask_folder))
-            mask_files = [f"{mask_folder}/{item}" for item in mask_files]
-            label += ['rlnMaskName']
-            data.append(mask_files)
-        if coordinate_folder != "None":
-            coordinate_files = sorted(os.listdir(coordinate_folder))
-            coordinate_files = [f"{coordinate_folder}/{item}" for item in coordinate_files]
-            # TODO read each coordinate file and add _rlnCoordinateX, Y, Z
+        def add_param(folder_name, param_name, default_val="None"):
+            if folder_name != "None":
+                # TODO check file extension
+                files = sorted(os.listdir(full_folder))
+                files = [f"{full_folder}/{item}" for item in files]
+                assert len(files) == num_tomo
+                data.append(files)
+            else:
+                data.append([default_val]*num_tomo)
+            label.append(param_name)
+
+        add_param(full_folder, 'rlnTomoName')
+        add_param(even_folder, 'rlnTomoReconstructedTomogramHalf1')
+        add_param(odd_folder, 'rlnTomoReconstructedTomogramHalf2')
+
+        # deconv parameters
+        add_param("None", 'rlnPixelSize',pixel_size)
+        add_param(defocus_folder, 'rlnDefocus',0)
+        add_param("None", "rlnSnrFalloff",1)
+        add_param("None", "rlnDeconvStrength",1)
+        add_param("None", "rlnDeconvTomoName","None")
+
+        # mask parameters
+        add_param("None", "rlnMaskBoundary","None")
+        add_param("None", "rlnMaskDensityPercentage",50)
+        add_param("None", "rlnMaskStdPercentage",50)
+        add_param(mask_folder, "rlnMaskName","None")
+
+        #add_param(tilt_file_folder, 'rlnTiltFile')
+        #add_param(coordinate_folder, 'rlnBoxFile')
+        
+        add_param("None", 'rlnNumberSubtomo',number_subtomos)
         
         #TODO defocus file folder 
-        from IsoNet.util.fileio import read_defocus_file
+        #from IsoNet.utils.fileio import read_defocus_file
         #TODO decide the defocus file format from CTFFIND and GCTF
         
-        label += ['rlnNumberSubtomo']
-        data.append([n_subtomo]*len(tomograms_files))
-
-        data_length = len(data[0])
         data = list(map(list, zip(*data)))
         df = pd.DataFrame(data = data, columns = label)
-        df.insert(0, 'rlnIndex', np.arange(data_length)+1)
+        df.insert(0, 'rlnIndex', np.arange(num_tomo)+1)
         starfile.write(df,output_star)
 
-    def refine(self, 
+    def deconv(self, star_file: str,
+        deconv_folder:str="./deconv",
+        input_column: str="rlnTomoName",
+        voltage: float=300.0,
+        cs: float=2.7,
+        snrfalloff: float=None,
+        deconvstrength: float=None,
+        highpassnyquist: float=0.02,
+        chunk_size: int=None,
+        overlap_rate: float= 0.25,
+        ncpu:int=4,
+        tomo_idx: str=None):
+        """
+        \nCTF deconvolution for the tomograms.\n
+        isonet.py deconv star_file [--deconv_folder] [--snrfalloff] [--deconvstrength] [--highpassnyquist] [--overlap_rate] [--ncpu] [--tomo_idx]
+        This step is recommended because it enhances low resolution information for a better contrast. No need to do deconvolution for phase plate data.
+        :param deconv_folder: (./deconv) Folder created to save deconvoluted tomograms.
+        :param star_file: (None) Star file for tomograms.
+        :param voltage: (300.0) Acceleration voltage in kV.
+        :param cs: (2.7) Spherical aberration in mm.
+        :param snrfalloff: (1.0) SNR fall rate with the frequency. High values means losing more high frequency.
+        If this value is not set, the program will look for the parameter in the star file.
+        If this value is not set and not found in star file, the default value 1.0 will be used.
+        :param deconvstrength: (1.0) Strength of the deconvolution.
+        If this value is not set, the program will look for the parameter in the star file.
+        If this value is not set and not found in star file, the default value 1.0 will be used.
+        :param highpassnyquist: (0.02) Highpass filter for at very low frequency. We suggest to keep this default value.
+        :param chunk_size: (None) When your computer has enough memory, please keep the chunk_size as the default value: None . Otherwise, you can let the program crop the tomogram into multiple chunks for multiprocessing and assembly them into one. The chunk_size defines the size of individual chunk. This option may induce artifacts along edges of chunks. When that happen, you may use larger overlap_rate.
+        :param overlap_rate: (None) The overlapping rate for adjecent chunks.
+        :param ncpu: (4) Number of cpus to use.
+        :param tomo_idx: (None) If this value is set, process only the tomograms listed in this index. e.g. 1,2,4 or 5-10,15,16
+        """
+        from IsoNet.utils.deconvolution import deconv_one
+        import starfile
+        from IsoNet.utils.utils import idx2list
+        tomo_idx = idx2list(tomo_idx)
+
+        if not os.path.isdir(deconv_folder):
+            os.mkdir(deconv_folder)
+
+        star = starfile.read(star_file)
+        new_star = star.copy()
+
+        if not 'rlnSnrFalloff' in new_star.columns:
+            new_star['rlnSnrFalloff'] = 1
+            new_star['rlnDeconvStrength'] = 1
+            new_star['rlnDeconvTomoName'] = 'None'
+
+        for i, it in star.iterrows():
+            if tomo_idx is None or str(it.rlnIndex) in tomo_idx:
+                if snrfalloff is not None:
+                    new_star.loc[i,'rlnSnrFalloff'] = snrfalloff
+                if deconvstrength is not None:
+                    new_star.loc[i,'rlnDeconvStrength'] = deconvstrength
+                
+                tomo_file = it[input_column]
+                deconv_tomo_name = '{}/{}'.format(deconv_folder,os.path.basename(tomo_file))
+
+                deconv_one(tomo_file,deconv_tomo_name,voltage=voltage,cs=cs,
+                           defocus=new_star.loc[i,'rlnDefocus']/10000.0, 
+                           pixel_size=new_star.loc[i,'rlnPixelSize'],
+                           snrfalloff=new_star.loc[i,'rlnSnrFalloff'],
+                            deconvstrength=new_star.loc[i,'rlnDeconvStrength'],highpassnyquist=highpassnyquist,
+                            chunk_size=chunk_size,overlap_rate=overlap_rate,ncpu=ncpu)
+                new_star.loc[i,'rlnDeconvTomoName']=deconv_tomo_name
+
+        starfile.write(new_star,star_file) 
+        logging.info('\n######Isonet done ctf deconvolve######\n')
+
+        # except Exception:
+        #     error_text = traceback.format_exc()
+        #     f =open('log.txt','a+')
+        #     f.write(error_text)
+        #     f.close()
+        #     logging.error(error_text)
+            # with mrcfile.new(f"{output_dir}/corrected_{file_name}.mrc") as mrc:
+            #     mrc.set_data(outData)
+
+    def make_mask(self,star_file,
+                input_column: str = "rlnDeconvTomoName",
+                mask_folder: str = 'mask',
+                patch_size: int=4,
+                mask_boundary: str=None,
+                density_percentage: int=None,
+                std_percentage: int=None,
+                use_deconv_tomo:bool=True,
+                z_crop:float=None,
+                tomo_idx=None):
+        """
+        \ngenerate a mask that include sample area and exclude "empty" area of the tomogram. The masks do not need to be precise. In general, the number of subtomograms (a value in star file) should be lesser if you masked out larger area. \n
+        isonet.py make_mask star_file [--mask_folder] [--patch_size] [--density_percentage] [--std_percentage] [--use_deconv_tomo] [--tomo_idx]
+        :param star_file: path to the tomogram or tomogram folder
+        :param mask_folder: path and name of the mask to save as
+        :param patch_size: (4) The size of the box from which the max-filter and std-filter are calculated.
+        :param density_percentage: (50) The approximate percentage of pixels to keep based on their local pixel density.
+        If this value is not set, the program will look for the parameter in the star file.
+        If this value is not set and not found in star file, the default value 50 will be used.
+        :param std_percentage: (50) The approximate percentage of pixels to keep based on their local standard deviation.
+        If this value is not set, the program will look for the parameter in the star file.
+        If this value is not set and not found in star file, the default value 50 will be used.
+        :param use_deconv_tomo: (True) If CTF deconvolved tomogram is found in tomogram.star, use that tomogram instead.
+        :param z_crop: If exclude the top and bottom regions of tomograms along z axis. For example, "--z_crop 0.2" will mask out the top 20% and bottom 20% region along z axis.
+        :param tomo_idx: (None) If this value is set, process only the tomograms listed in this index. e.g. 1,2,4 or 5-10,15,16
+        """
+        from IsoNet.bin.make_mask import make_mask
+        from IsoNet.utils.utils import idx2list
+
+        logging.basicConfig(format='%(asctime)s, %(levelname)-8s %(message)s',
+        datefmt="%m-%d %H:%M:%S",level=logging.INFO,handlers=[logging.StreamHandler(sys.stdout)])
+        logging.info('\n######Isonet starts making mask######\n')
+
+        try:
+            if not os.path.isdir(mask_folder):
+                os.mkdir(mask_folder)
+                
+            star = starfile.read(star_file)
+            new_star = star.copy()
+
+            if not 'rlnMaskDensityPercentage' in new_star.columns:
+                new_star['rlnMaskDensityPercentage'] = 50
+                new_star['rlnMaskStdPercentage'] = 50
+                new_star['rlnMaskName'] = 'None'
+
+            tomo_idx = idx2list(tomo_idx)
+            for i, it in star.iterrows():
+                if tomo_idx is None or str(it.rlnIndex) in tomo_idx:
+                    if density_percentage is not None:
+                        new_star.loc[i,'rlnMaskDensityPercentage'] = density_percentage
+                    if std_percentage is not None:
+                        new_star.loc[i,'rlnMaskStdPercentage'] = std_percentage
+
+                    tomo_file = it[input_column]
+                    tomo_root_name = os.path.splitext(os.path.basename(tomo_file))[0]
+
+                    if os.path.isfile(tomo_file):
+                        logging.info('make_mask: {}| dir_to_save: {}| percentage: {}| window_scale: {}'.format(tomo_file,
+                        mask_folder, it.rlnMaskDensityPercentage, patch_size))
+                        
+                        #if mask_boundary is None:
+                        if "rlnMaskBoundary" in star.columns.tolist() and it.rlnMaskBoundary not in [None, "None"]:
+                            mask_boundary = it.rlnMaskBoundary 
+                        else:
+                            mask_boundary = None
+                              
+                        mask_out_name = '{}/{}_mask.mrc'.format(mask_folder,tomo_root_name)
+                        make_mask(tomo_file,
+                                mask_out_name,
+                                mask_boundary=mask_boundary,
+                                side=patch_size,
+                                density_percentage=it.rlnMaskDensityPercentage,
+                                std_percentage=it.rlnMaskStdPercentage,
+                                surface = z_crop)
+
+                new_star.loc[i,'rlnMaskName']=mask_out_name
+            starfile.write(new_star,star_file)
+            logging.info('\n######Isonet done making mask######\n')
+
+        except Exception:
+            error_text = traceback.format_exc()
+            f =open('log.txt','a+')
+            f.write(error_text)
+            f.close()
+            logging.error(error_text)
+
+    def extract(self,  
+                star_file: str,
+                input_column: str = "rlnDeconvTomoName",
+                subtomo_folder="subtomos", 
+                subtomo_star = "subtomos.star", 
+                #between_tilts=False, 
+                cube_size = 64,
+                crop_size = None, 
+                tomo_idx = None,
+                uniform_extract=False):
+        
+        from IsoNet.utils.utils import mkfolder
+        from IsoNet.preprocessing.cubes import extract_with_overlap
+        from IsoNet.preprocessing.cubes import extract_subvolume, create_cube_seeds
+
+        if crop_size is None:
+            crop_size = cube_size + 16
+
+        tomo_star = starfile.read(star_file)
+        tomo_columns = tomo_star.columns.to_list()
+        mkfolder(subtomo_folder, remove=True)
+        particle_list = []
+        for i, row in tomo_star.iterrows():
+            if tomo_idx is None or str(row.rlnIndex) in tomo_idx: 
+
+                # wedge 
+                # wedge_path = os.path.join(subtomo_folder, tomo_folder, 'wedge.mrc')
+                # if "rlnTiltFile" in list(df.columns):
+                #     self.psf(size=crop_size, tilt_file=row["rlnTiltFile"], output=wedge_path, between_tilts=between_tilts)
+                # else:
+                #     print(wedge_path)
+                #     self.psf(size=crop_size, output=wedge_path, between_tilts=between_tilts)
+                # if apply_wedge:
+                #     wedge, vs = read_mrc(wedge_path)
+                # else:
+                #     wedge = None
+
+                tomo_name = row[input_column]
+                tomo = read_and_norm(tomo_name)
+
+                if "rlnMaskName" in tomo_columns:
+                    mask_file = row["rlnMaskName"]
+                    with mrcfile.open(mask_file,permissive=True) as mrc:
+                        mask=mrc.data
+                else:
+                    mask = np.ones_like(tomo)
+                count_start = len(particle_list)
+                if uniform_extract:
+                    #TODO uniform extract with mask
+                    subtomos_names = extract_with_overlap(tomo, crop_size, cube_size, subtomo_folder, prefix='', wedge=None)
+                else:
+                    n_subtomo_per_tomo = row["rlnNumberSubtomo"]
+                    seeds=create_cube_seeds(tomo, n_subtomo_per_tomo, crop_size, mask)
+                    subtomos_names = extract_subvolume(tomo, seeds, crop_size, subtomo_folder, count_start, wedge=None)
+                
+                
+                for i in range(len(subtomos_names)):
+                    im_name = '{}/subvolume{}_{:0>6d}.mrc'.format(subtomo_folder, '', count_start+i)
+                    particle_list.append([im_name, cube_size, crop_size])
+
+        df = pd.DataFrame(particle_list, columns = ["rlnParticleName", "rlnCubeSize","rlnCropSize"])
+        starfile.write(df, subtomo_star)
+        #extract_list = [df['rlnParticleName'].tolist()]   
+
+        return  #extract_list
+    
+    def refine(self,
+        subtomo_star: str,
+        gpuID: str = None,
+        iterations: int = None,
+        data_dir: str = None,
+        pretrained_model: str = None,
+        log_level: str = "info",
+        output_dir: str='results',
+        remove_intermediate: bool =False,
+        select_subtomo_number: int = None,
+        ncpus: int = 16,
+        continue_from: str=None,
+        epochs: int = 10,
+        batch_size: int = None,
+        steps_per_epoch: int = None,
+
+        noise_level:  tuple=(0.05,0.10,0.15,0.20),
+        noise_start_iter: tuple=(11,16,21,26),
+        noise_mode: str = None,
+        noise_dir: str = None,
+        learning_rate: float = None,
+        drop_out: float = 0.3,
+        convs_per_depth: int = 3,
+        kernel: tuple = (3,3,3),
+        pool: tuple = None,
+        unet_depth: int = 3,
+        filter_base: int = None,
+        batch_normalization: bool = True,
+        normalize_percentile: bool = True,
+
+    ):
+
+        """
+        \n\n
+        IsoNet.py map_refine half.mrc FSC3D.mrc --mask mask.mrc --limit_res 3.5 [--gpuID] [--ncpus] [--output_dir] [--fsc_file]...
+        :param i: Input half map 1
+        :param aniso_file: 3DFSC file
+        :param mask: Filename of a user-provided mask
+        :param independent: Independently process half1 and half2, this will disable the noise2noise-based denoising but will provide independent maps for gold-standard FSC
+        :param gpuID: The ID of gpu to be used during the training.
+        :param alpha: Ranging from 0 to inf. Weighting between the equivariance loss and consistency loss.
+        :param beta: Ranging from 0 to inf. Weighting of the denoising. Large number means more denoising. 
+        :param limit_res: Important! Resolution limit for IsoNet recovery. Information beyong this limit will not be modified.
+        :param ncpus: Number of cpu.
+        :param output_dir: The name of directory to save output maps
+        :param pretrained_model: The neural network model with ".pt" to continue training or prediction. 
+        :param reference: Retain the low resolution information from the reference in the IsoNet refine process.
+        :param ref_resolution: The limit resolution to keep from the reference. Ususlly  10-20 A resolution. 
+        :param epochs: Number of epochs.
+        :param n_subvolume: Number of subvolumes 
+        :param predict_crop_size: The size of subvolumes, should be larger then the cube_size
+        :param cube_size: Size of cubes for training, should be divisible by 16, e.g. 32, 64, 80.
+        :param batch_size: Size of the minibatch. If None, batch_size will be the max(2 * number_of_gpu,4). batch_size should be divisible by the number of gpu.
+        :param acc_batches: If this value is set to 2 (or more), accumulate gradiant will be used to save memory consumption.  
+        :param learning_rate: learning rate. Default learning rate is 3e-4 while previous IsoNet tomography used 3e-4 as learning rate
+        """
+
+
+        from IsoNet.utils.dict2attr import Arg
+        logging.basicConfig(format='%(asctime)s, %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s'
+            ,datefmt="%H:%M:%S",level=logging.DEBUG,handlers=[logging.StreamHandler(sys.stdout)])   
+        
+        
+        params = Arg(locals())
+        
+        from IsoNet.bin.refine import run
+        run(params)
+
+       
+
+
+        logging.info("Finished")
+
+    def refine_backup(self, 
                    star_file: str,
                    gpuID: str=None,
                    n2n: bool=False,
@@ -468,63 +735,7 @@ class ISONET:
         with mrcfile.new(output, overwrite=True) as mrc:
             mrc.set_data(out_mat)
 
-    def prepare_star(self, folder_name, output_star='tomograms.star', apix = None, defocus = 0.0, number_subtomos = 100):
-        """
-        \nThis command generates a tomograms.star file from a folder containing only tomogram files (.mrc or .rec).\n
-        isonet.py prepare_star folder_name [--output_star] [--pixel_size] [--defocus] [--number_subtomos]
-        :param folder_name: (None) directory containing tomogram(s). Usually 1-5 tomograms are sufficient.
-        :param output_star: (tomograms.star) star file similar to that from "relion". You can modify this file manually or with gui.
-        :param pixel_size: (10) pixel size in angstroms. Usually you want to bin your tomograms to about 10A pixel size.
-        Too large or too small pixel sizes are not recommended, since the target resolution on Z-axis of corrected tomograms should be about 30A.
-        :param defocus: (0.0) defocus in Angstrom. Only need for ctf deconvolution. For phase plate data, you can leave defocus 0.
-        If you have multiple tomograms with different defocus, please modify them in star file or with gui.
-        :param number_subtomos: (100) Number of subtomograms to be extracted in later processes.
-        If you want to extract different number of subtomograms in different tomograms, you can modify them in the star file generated with this command or with gui.
 
-        """
-        import starfile
-        import pandas as pd
-        import mrcfile
-        tomo_list = sorted(os.listdir(folder_name))        
-        tomo_path = os.path.join(folder_name, tomo_list[0])
-        data = []
-
-        if os.path.isdir(tomo_path):
-            for i,tomo_name in enumerate(tomo_list):
-                if apix is None:
-                    voxel_size = 1
-                tomo_path = os.path.join(folder_name,tomo_name)
-                files=os.listdir(tomo_path)
-                tomo_file = []
-                tilt_file = "None"
-                for item in files:
-                    item_path = os.path.join(tomo_path,item)
-                    if item[-4:]=='.mrc' or item[-4:]=='.rec':
-                        tomo_file.append(item_path)
-                    if item[-3:]=='tlt':
-                        tilt_file = item_path 
-
-                if len(tomo_file) == 1:
-                    label = ['rlnIndex','rlnTomoName','rlnTiltFile','rlnPixelSize','rlnDefocus']
-                    data.append([i, tomo_file[0], tilt_file, voxel_size, defocus])   
-                else:
-                    label = ['rlnIndex','rlnTomoReconstructedTomogramHalf1','rlnTomoReconstructedTomogramHalf2','rlnTiltFile','rlnPixelSize','rlnDefocus']
-                    data.append([i, tomo_file[0], tomo_file[1], tilt_file, voxel_size, defocus]) 
-
-        else:
-            for i,tomo_name in enumerate(tomo_list):
-                if tomo_path[-4:]=='.mrc' or tomo_path[-4:]=='.rec':
-                    tomo_path = os.path.join(folder_name,tomo_name)
-                    if apix is None:
-                        volume, voxel_size = read_mrc(tomo_path)
-                        if voxel_size == 0:
-                            voxel_size = 1.0
-                    else:
-                        voxel_size = apix
-                    label = ['rlnIndex','rlnTomoName','rlnPixelSize','rlnNumberSubtomo', 'rlnDefocus']
-                    data.append([i, tomo_path, voxel_size,number_subtomos, defocus])  
-        df = pd.DataFrame(data, columns = label)
-        starfile.write(df,output_star)
 
     def extract_both(self,  star, subtomo_folder="subtomos", out_star = "subtomos.star", 
                 between_tilts=False, cube_size=96, crop_size=128, 
@@ -533,193 +744,52 @@ class ISONET:
                 between_tilts=between_tilts, cube_size=cube_size, crop_size=crop_size, 
                 tomo_type=0, random = random)
 
-    def extract(self,  star, subtomo_folder="subtomos", out_star = "subtomos.star", 
-                between_tilts=False, cube_size=96, crop_size=128, 
-                use_denoised=False, use_deconv=False, random = True, apply_wedge = True):
-        if use_deconv:
-            tomo_type = 2
-        elif use_denoised:
-            tomo_type = 3
-        else:
-            tomo_type = 0
 
+
+
+
+    def denoise(self, 
+                   star_file: str,
+                   gpuID: str=None,
+
+                   ncpus: int=16, 
+                   output_dir: str="isonet_maps",
+                   pretrained_model: str=None,
+
+                   epochs: int=50,
+                   cube_size: int=128,
+                   crop_size: int=None,
+                   batch_size: int=None, 
+                   acc_batches: int=1,
+                   learning_rate: float=3e-4
+                   ):
+        
         if crop_size is None:
-            crop_size = cube_size
+            crop_size = cube_size + 16
 
-        from IsoNet.utils.utils import mkfolder
-        from IsoNet.preprocessing.cubes import extract_with_overlap
-        from IsoNet.preprocessing.cubes import extract_subvolume, create_cube_seeds
+        ngpus, gpuID, gpuID_list=parse_gpu(gpuID)
 
-        df = starfile.read(star)
-        mkfolder(subtomo_folder, remove=True)
-        particle_list = []
-        for index, row in df.iterrows():
-            tomo_index = row["rlnIndex"]
-            tomo_folder = f"TS_{tomo_index:05d}"
-            
-            print(tomo_folder)
-            mkfolder(os.path.join(subtomo_folder, tomo_folder))
-
-            # wedge 
-            wedge_path = os.path.join(subtomo_folder, tomo_folder, 'wedge.mrc')
-            if "rlnTiltFile" in list(df.columns):
-                self.psf(size=crop_size, tilt_file=row["rlnTiltFile"], output=wedge_path, between_tilts=between_tilts)
+        if batch_size is None:
+            if ngpus == 1:
+                batch_size = 4
             else:
-                print(wedge_path)
-                self.psf(size=crop_size, output=wedge_path, between_tilts=between_tilts)
-            if apply_wedge:
-                wedge, vs = read_mrc(wedge_path)
-            else:
-                wedge = None
+                batch_size = 2 * len(gpuID_list)
 
-            # first half
-            even_folder = os.path.join(subtomo_folder, tomo_folder, 'subtomo0')
-            mkfolder(even_folder)
-            tomo_name = row[types[tomo_type][0]]
-            tomo = read_and_norm(tomo_name)
-
-            # TODO mask
-            mask = np.ones_like(tomo)
-
-            if random:
-                n_subtomo_per_tomo = row["rlnNumberSubtomo"]
-                seeds=create_cube_seeds(tomo, n_subtomo_per_tomo, crop_size, mask)
-                subtomos_names = extract_subvolume(tomo, seeds, crop_size, even_folder, prefix='', wedge=wedge)
-            else:
-                subtomos_names = extract_with_overlap(tomo, crop_size, cube_size, even_folder, prefix='', wedge=None)
-            
-            # second half
-            if tomo_type < 1:
-                odd_folder = os.path.join(subtomo_folder, tomo_folder, 'subtomo1')
-                tomo_name = row[types[tomo_type][1]]
-                mkfolder(odd_folder)
-                tomo = read_and_norm(tomo_name)
-                if random:
-                    subtomos_names = extract_subvolume(tomo, seeds, crop_size, odd_folder)
-                else:
-                    subtomos_names = extract_with_overlap(tomo, crop_size, cube_size, odd_folder, prefix='', wedge=None)                
-
-            for i in range(len(subtomos_names)):
-                im_name1 = '{}/subvolume{}_{:0>6d}.mrc'.format(even_folder, '', i)
-                if tomo_type < 1:#"rlnTomogram2Name" in list(df.columns):
-                    im_name2 = '{}/subvolume{}_{:0>6d}.mrc'.format(odd_folder, '', i)
-                    particle_list.append([im_name1,im_name2,wedge_path])
-                    label = ["rlnParticleName","rlnParticle2Name","rlnWedgeName"]                    
-                else:
-                    particle_list.append([im_name1,wedge_path])
-                    label = ["rlnParticleName","rlnWedgeName"]
-
-        df = pd.DataFrame(particle_list, columns = label)
-        starfile.write(df, out_star)
-        if tomo_type < 1:
-            extract_list = [df['rlnParticleName'].tolist(),df['rlnParticle2Name'].tolist()]
-        else:
-            extract_list = [df['rlnParticleName'].tolist()]   
-
-        return  extract_list
-
-    def deconv(self, star_file: str,
-        deconv_folder:str="./deconv",
-        do_half: bool = False,
-        voltage: float=300.0,
-        cs: float=2.7,
-        snrfalloff: float=None,
-        deconvstrength: float=None,
-        highpassnyquist: float=0.02,
-        chunk_size: int=None,
-        overlap_rate: float= 0.25,
-        ncpu:int=4,
-        tomo_idx: str=None):
-        """
-        \nCTF deconvolution for the tomograms.\n
-        isonet.py deconv star_file [--deconv_folder] [--snrfalloff] [--deconvstrength] [--highpassnyquist] [--overlap_rate] [--ncpu] [--tomo_idx]
-        This step is recommended because it enhances low resolution information for a better contrast. No need to do deconvolution for phase plate data.
-        :param deconv_folder: (./deconv) Folder created to save deconvoluted tomograms.
-        :param star_file: (None) Star file for tomograms.
-        :param voltage: (300.0) Acceleration voltage in kV.
-        :param cs: (2.7) Spherical aberration in mm.
-        :param snrfalloff: (1.0) SNR fall rate with the frequency. High values means losing more high frequency.
-        If this value is not set, the program will look for the parameter in the star file.
-        If this value is not set and not found in star file, the default value 1.0 will be used.
-        :param deconvstrength: (1.0) Strength of the deconvolution.
-        If this value is not set, the program will look for the parameter in the star file.
-        If this value is not set and not found in star file, the default value 1.0 will be used.
-        :param highpassnyquist: (0.02) Highpass filter for at very low frequency. We suggest to keep this default value.
-        :param chunk_size: (None) When your computer has enough memory, please keep the chunk_size as the default value: None . Otherwise, you can let the program crop the tomogram into multiple chunks for multiprocessing and assembly them into one. The chunk_size defines the size of individual chunk. This option may induce artifacts along edges of chunks. When that happen, you may use larger overlap_rate.
-        :param overlap_rate: (None) The overlapping rate for adjecent chunks.
-        :param ncpu: (4) Number of cpus to use.
-        :param tomo_idx: (None) If this value is set, process only the tomograms listed in this index. e.g. 1,2,4 or 5-10,15,16
-        """
-        from IsoNet.utils.deconvolution import deconv_one
-        import starfile
-        from IsoNet.utils.utils import read_mrc, write_mrc
-        from IsoNet.utils.utils import idx2list
-        tomo_idx = idx2list(tomo_idx)
-
-        if not os.path.isdir(deconv_folder):
-            os.mkdir(deconv_folder)
-
-        star = starfile.read(star_file)
-        new_star = star.copy()
-
-        if not 'rlnSnrFalloff' in new_star.columns:
-            new_star['rlnSnrFalloff'] = 1
-            new_star['rlnDeconvStrength'] = 1
-            new_star['rlnDeconvTomoName'] = 'None'
-            new_star['rlnDeconvTomo2Name'] = 'None'
-
-        starfile.write(new_star,"test.star") 
-        for i, it in star.iterrows():
-            if tomo_idx is None or str(it.rlnIndex) in tomo_idx:
-                if snrfalloff is not None:
-                    new_star.loc[i,'rlnSnrFalloff']=snrfalloff
-                if deconvstrength is not None:
-                    new_star.loc[i,'rlnDeconvStrength']=deconvstrength
-                
-                tomo_file = it['rlnTomogramName']
-                base_name = os.path.basename(tomo_file)
-                deconv_tomo_name = '{}/{}'.format(deconv_folder,base_name)
-                print(tomo_file,base_name)
-                if 'rlnTomogram2Name' in new_star.columns and not do_half:
-                    tomo_file2 = it['rlnTomogram2Name']
-                    data2,voxel_size = read_mrc(tomo_file2)
-                    data1,voxel_size  = read_mrc(tomo_file)
-                    data = (data2 + data1)/2
-                    write_mrc('tmp_full.mrc', data, voxel_size)
-                    tomo_file = 'tmp_full.mrc'
-
-                deconv_one(tomo_file,deconv_tomo_name,voltage=voltage,cs=cs,
-                           defocus=new_star.loc[i,'rlnDefocus']/10000.0, 
-                           pixel_size=new_star.loc[i,'rlnPixelSize'],
-                           snrfalloff=new_star.loc[i,'rlnSnrFalloff'],
-                            deconvstrength=new_star.loc[i,'rlnDeconvStrength'],highpassnyquist=highpassnyquist,
-                            chunk_size=chunk_size,overlap_rate=overlap_rate,ncpu=ncpu)
-                new_star.loc[i,'rlnDeconvTomoName']=deconv_tomo_name
-
-                if 'rlnTomogram2Name' in new_star.columns and do_half:
-                    tomo_file = it['rlnTomogram2Name']
-                    base_name = os.path.basename(tomo_file)
-                    deconv_tomo_name = '{}/{}'.format(deconv_folder,base_name)
-                    deconv_one(tomo_file,deconv_tomo_name,voltage=voltage,cs=cs,
-                           defocus=new_star.loc[i,'rlnDefocus']/10000.0, 
-                           pixel_size=new_star.loc[i,'rlnPixelSize'],
-                           snrfalloff=new_star.loc[i,'rlnSnrFalloff'],
-                            deconvstrength=new_star.loc[i,'rlnDeconvStrength'],highpassnyquist=highpassnyquist,
-                            chunk_size=chunk_size,overlap_rate=overlap_rate,ncpu=ncpu)
-                    new_star.loc[i,'rlnDeconvTomo2Name']=deconv_tomo_name
-        starfile.write(new_star,star_file) 
-        logging.info('\n######Isonet done ctf deconvolve######\n')
-
-        # except Exception:
-        #     error_text = traceback.format_exc()
-        #     f =open('log.txt','a+')
-        #     f.write(error_text)
-        #     f.close()
-        #     logging.error(error_text)
-            # with mrcfile.new(f"{output_dir}/corrected_{file_name}.mrc") as mrc:
-            #     mrc.set_data(outData)
-
-
+        # extract subtomograms
+        data_list = self.extract(star_file, subtomo_folder=output_dir+"/subtomos", 
+                between_tilts=False, random=False, cube_size=cube_size, crop_size=cube_size, 
+                )
+        # noise2noise training
+        from IsoNet.bin.refine import run_training
+        run_training([data_list[0] + data_list[1],data_list[1] + data_list[0]], epochs = epochs, mixed_precision = False,
+                output_dir = output_dir, outmodel_path=f"{output_dir}/n2n.pt", pretrained_model=pretrained_model,
+                ncpus=16, batch_size = batch_size, acc_batches=acc_batches, learning_rate= learning_rate)
+        # noise2noise prediction
+        self.predict(star_file, model=output_dir+"/n2n.pt", output_dir=output_dir, 
+                    gpuID = gpuID, cube_size=cube_size,
+                    crop_size=crop_size,tomo_type=0, out_type = 5,
+                    batch_size = batch_size,normalize_percentile=False,
+                    log_level="info", tomo_idx=None)
 
     def check(self):
         logging.basicConfig(format='%(asctime)s, %(levelname)-8s %(message)s',
