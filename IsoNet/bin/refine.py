@@ -67,7 +67,6 @@ def run(params):
                 ### First iteration ###
                 mkfolder(params.output_dir,remove=False)
                 #prepare_first_model(params)
-                print("here")
                 prepare_first_iter(params)
             else:
                 ### Subsequent iterations for all conditions ###

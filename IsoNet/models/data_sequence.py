@@ -40,7 +40,7 @@ class Train_sets_n2n(Dataset):
     Dataset class to load tomograms and provide subvolumes for n2n and spisonet methods.
     """
 
-    def __init__(self, tomo_star, method="n2n", cube_size=64, n_samples=1000):
+    def __init__(self, tomo_star, method="n2n", cube_size=64, n_samples=500):
         self.star = starfile.read(tomo_star)
         self.method = method
         self.n_samples_per_tomo = n_samples
@@ -75,13 +75,13 @@ class Train_sets_n2n(Dataset):
             coords = self.create_random_coords(tomo_data.shape, mask, self.n_samples_per_tomo)
             self.coords.append(coords)
 
-            if self.method in ['spisonet', 'spisonet-single']:
+            if self.method in ['spisonet', 'spisonet-single', 'spisonet-ddw']:
                 min_angle, max_angle = row['rlnTiltMin'], row['rlnTiltMax']
                 self.mw_list.append(self._compute_missing_wedge(self.sample_shape[0], min_angle, max_angle))
 
     def _load_tomogram_and_mask(self, row, column_name_list):
         """Load tomogram data and corresponding mask."""
-        if self.method in ['spisonet', 'n2n']:
+        if self.method in ['spisonet', 'n2n','spisonet-ddw']:
             self.tomo_paths_odd.append(row['rlnTomoReconstructedTomogramHalf1'])
             self.tomo_paths_even.append(row['rlnTomoReconstructedTomogramHalf2'])
             tomo_data, _ = read_mrc(row['rlnTomoReconstructedTomogramHalf1'])
@@ -143,7 +143,7 @@ class Train_sets_n2n(Dataset):
         tomo_index, coord_index = divmod(idx, self.n_samples_per_tomo)
         z, y, x = self.coords[tomo_index][coord_index]
 
-        if self.method in ['n2n', 'spisonet']:
+        if self.method in ['n2n', 'spisonet','spisonet-ddw']:
             even_subvolume = self.load_and_normalize(self.tomo_paths_even, tomo_index, z, y, x)
             odd_subvolume = self.load_and_normalize(self.tomo_paths_odd, tomo_index, z, y, x)
 
@@ -152,7 +152,7 @@ class Train_sets_n2n(Dataset):
                 np.array(odd_subvolume, dtype=np.float32)[np.newaxis, ...]
             )
 
-            if self.method == 'spisonet':
+            if self.method in ['spisonet','spisonet-ddw']:
                 return x, y, self.mw_list[tomo_index]
             return x, y
         

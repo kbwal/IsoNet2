@@ -324,7 +324,7 @@ class ISONET:
                 tomo, _ = read_mrc(tomo_name)
                 tomo = normalize(tomo)
 
-                if "rlnMaskName" in tomo_columns:
+                if "rlnMaskName" in tomo_columns and row["rlnMaskName"] not in [None, "None"]:
                     mask_file = row["rlnMaskName"]
                     with mrcfile.open(mask_file,permissive=True) as mrc:
                         mask=mrc.data
@@ -360,7 +360,7 @@ class ISONET:
         output_dir: str='results',
         remove_intermediate: bool =False,
         select_subtomo_number: int = None,
-        ncpus: int = 16,
+        ncpus: int = 8,
         continue_from: str=None,
         epochs: int = 10,
         batch_size: int = None,
@@ -468,7 +468,6 @@ class ISONET:
             out_column = "rlnDenoisedTomoName"
         if out_column not in star.columns:
             star[out_column] = None
-
         if network.method == 'regular':
             if out_column not in star.columns:
                 star[out_column] = None
@@ -483,7 +482,7 @@ class ISONET:
                 star.at[index, out_column] = out_file_name
             starfile.write(star,star_file)
 
-        if network.method == 'n2n' or network.method == 'spisonet':
+        if network.method in ['n2n','spisonet','spisonet-ddw']:
 
             for index, tomo_row in star.iterrows():
                 tomo1, _ = read_mrc(tomo_row["rlnTomoReconstructedTomogramHalf1"])
@@ -507,7 +506,7 @@ class ISONET:
                    gpuID: str=None,
 
                    #ncpus: int=16, 
-                   only_denoise = False,
+                   method = "spisonet-ddw",
                    output_dir: str="isonet_maps",
                    pretrained_model: str=None,
                    cube_size: int=64,
@@ -532,10 +531,10 @@ class ISONET:
                 batch_size = 2 * len(gpuID_list)
         steps_per_epoch = 200
 
-        if only_denoise == True:
-            method = "n2n"
-        else:
-            method = "spisonet"
+        # if only_denoise == True:
+        #     method = "n2n"
+        # else:
+        #     method = "spisonet"
 
         from IsoNet.models.network import Net
         network = Net(method=method, arch='unet-default')
