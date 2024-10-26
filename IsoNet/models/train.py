@@ -8,7 +8,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 from IsoNet.utils.utils import debug_matrix
 import random
-
+from IsoNet.models.masked_loss import masked_loss
 
 # def apply_filter(data, mwshift):
 #     # mwshift [x, y, z]
@@ -39,7 +39,7 @@ def ddp_train(rank, world_size, port_number, model, training_params):
         from IsoNet.models.data_sequence import Train_sets_regular
         train_dataset = Train_sets_regular(training_params['data_path'])
 
-    elif training_params['method'] in ['n2n', 'spisonet']:
+    elif training_params['method'] in ['n2n', 'spisonet', 'spisonet-ddw']:
         from IsoNet.models.data_sequence import Train_sets_n2n
         if rank == 0:
             print("calculate subtomograms position")
@@ -143,6 +143,40 @@ def ddp_train(rank, world_size, port_number, model, training_params):
                     pred_y = model(data_e)
                     loss_equivariance_1 = loss_fn(pred_y, data_rot)
                     loss = training_params['alpha'] * loss_equivariance_1 + loss_consistency_1
+
+                elif training_params['method'] == "spisonet-ddw":
+
+                    mwshift = batch[2].cuda()
+                    mw = torch.fft.fftshift(mwshift, dim=(-1, -2, -3))
+
+                    data = torch.zeros_like(preds)
+                    for j,d in enumerate(preds):
+                        data[j][0] = torch.real(torch.fft.ifftn(mwshift[j]*torch.fft.fftn(d[0])))#.astype(np.float32)
+                    loss_consistency_2 = loss_fn(data,x2)
+
+                    data_combine_rot_mw = torch.zeros_like(preds)
+                    data_combine_rot = torch.zeros_like(preds)
+
+                    rotated_mw = torch.zeros_like(mw)
+                    for k,d in enumerate(preds):
+                        rot = random.choice(rotation_list_24)
+
+
+                        outside_mw = torch.real(torch.fft.ifftn((1-mwshift[k])*torch.fft.fftn(preds[k][0])))
+                        inside_mw = torch.real(torch.fft.ifftn(mwshift[k]*torch.fft.fftn(x1[k][0])))
+                        tmp = outside_mw + inside_mw                   
+                        tmp = torch.rot90(tmp,rot[0][1],rot[0][0])
+                        tmp = torch.rot90(tmp,rot[1][1],rot[1][0])
+                        data_combine_rot[k] = tmp
+                        data_combine_rot_mw[k] = torch.real(torch.fft.ifftn(mwshift[k]*torch.fft.fftn(tmp)))
+                    
+                        tmp_mw = torch.rot90(mw[k],rot[0][1],rot[0][0])
+                        rotated_mw[k] = torch.rot90(tmp_mw,rot[0][1],rot[0][0])
+
+                    pred_y = model(data_combine_rot_mw)
+                    loss_ddw = masked_loss(pred_y, data_combine_rot, rotated_mw, mw, mw_weight=2.0)
+
+                    loss = training_params['alpha'] * loss_consistency_2 + loss_ddw
                                 
                 
                 loss = loss / training_params['acc_batches']

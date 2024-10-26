@@ -3,7 +3,7 @@ import torch
 from torch import fft
 
 # This is essence of deepdewedge
-# inside_mw_loss it the same as IsoNet
+# inside_mw_loss is for IsoNet
 # outside_mw_loss is for noise2noise
 
 def masked_loss(model_output, target, rot_mw_mask, mw_mask, mw_weight=2.0):
