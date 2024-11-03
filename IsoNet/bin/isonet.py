@@ -523,6 +523,7 @@ class ISONET:
         mkfolder(output_dir)
 
         ngpus, gpuID, gpuID_list=parse_gpu(gpuID)
+        # print(ngpus, gpuID, gpuID_list)
 
         if batch_size is None:
             if ngpus == 1:

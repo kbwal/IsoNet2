@@ -1,2 +1,2 @@
-export PATH=~/software/IsoNet2/IsoNet/bin:$PATH
-export PYTHONPATH=~/software/IsoNet2:$PYTHONPATH
+export PATH=/home/cii/software/IsoNet2/IsoNet/bin:$PATH
+export PYTHONPATH=/home/cii/software/IsoNet2:$PYTHONPATH
