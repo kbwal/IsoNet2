@@ -40,10 +40,10 @@ class Train_sets_n2n(Dataset):
     Dataset class to load tomograms and provide subvolumes for n2n and spisonet methods.
     """
 
-    def __init__(self, tomo_star, method="n2n", cube_size=64, n_samples=500):
+    def __init__(self, tomo_star, method="n2n", cube_size=64):
         self.star = starfile.read(tomo_star)
         self.method = method
-        self.n_samples_per_tomo = n_samples
+        self.n_samples_per_tomo = []
         self.sample_shape = [cube_size, cube_size, cube_size]
 
         # Initialize paths, statistics, and coordinates
@@ -67,11 +67,12 @@ class Train_sets_n2n(Dataset):
         input_column = "rlnTomoName"
 
         for _, row in self.star.iterrows():
+            self.n_samples_per_tomo=row['rlnNumberSubtomo']
+
             tomo_data, mask = self._load_tomogram_and_mask(row, column_name_list)
 
             self.mean.append(np.mean(tomo_data))
             self.std.append(np.std(tomo_data))
-
             coords = self.create_random_coords(tomo_data.shape, mask, self.n_samples_per_tomo)
             self.coords.append(coords)
 

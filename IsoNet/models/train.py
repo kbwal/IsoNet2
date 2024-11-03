@@ -21,12 +21,13 @@ def ddp_train(rank, world_size, port_number, model, training_params):
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = port_number
     #os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
-    torch.cuda.set_device(rank)
-
+    
 
     if world_size > 1:
         dist.init_process_group(backend='nccl', rank=rank, world_size=world_size)
+        torch.cuda.set_device(rank)
         model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
+        model = model.to(rank)
         model = DDP(model, device_ids=[rank])
     else:
         model = model.to(rank)
@@ -231,7 +232,7 @@ def ddp_train(rank, world_size, port_number, model, training_params):
 def ddp_predict(rank, world_size, port_number, model, data, tmp_data_path):
 
     os.environ["MASTER_ADDR"] = "localhost"
-    os.environ["MASTER_PORT"] = port_number
+    os.environ["MASTER_PORT"] = str(port_number)
     dist.init_process_group(backend='nccl', rank=rank, world_size=world_size)
     torch.cuda.set_device(rank)
 
@@ -243,17 +244,49 @@ def ddp_predict(rank, world_size, port_number, model, data, tmp_data_path):
     num_data_points = data.shape[0]
     steps_per_rank = (num_data_points + world_size - 1) // world_size
 
-    output = torch.zeros(steps_per_rank,data.shape[1],data.shape[2],data.shape[3],data.shape[4]).to(rank)
+    outputs = []
+
     with torch.no_grad():
-        for i in tqdm(range(rank * steps_per_rank, min((rank + 1) * steps_per_rank, num_data_points)),disable=(rank!=0)):
-            batch_input  = data[i:i+1]
-            batch_output  = model(batch_input.to(rank))
-            output[i - rank * steps_per_rank] = batch_output
-    gathered_outputs = [torch.zeros_like(output) for _ in range(world_size)]
-    dist.all_gather(gathered_outputs, output)
+        for i in tqdm(
+            range(rank * steps_per_rank, min((rank + 1) * steps_per_rank, num_data_points)),
+            disable=(rank != 0)
+        ):
+            batch_input = data[i:i + 1].to(rank)
+            batch_output = model(batch_input).cpu()  # Move output to CPU immediately
+            outputs.append(batch_output)
+
+    output = torch.cat(outputs, dim=0).cpu().numpy()
+    rank_output_path = f"{tmp_data_path}_rank_{rank}.npy"
+    np.save(rank_output_path, output)
+
     dist.barrier()
+
     if rank == 0:
-        gathered_outputs = torch.cat(gathered_outputs).cpu().numpy()
-        gathered_outputs = gathered_outputs[:data.shape[0]]
-        np.save(tmp_data_path,gathered_outputs)
+        all_outputs = []
+        for r in range(world_size):
+            rank_output_path = f"{tmp_data_path}_rank_{r}.npy"
+            rank_output = np.load(rank_output_path)
+            all_outputs.append(rank_output)
+        
+        gathered_outputs = np.concatenate(all_outputs, axis=0)[:num_data_points]
+        np.save(tmp_data_path, gathered_outputs)
+    
+        for r in range(world_size):
+            os.remove(f"{tmp_data_path}_rank_{r}.npy")
+
     dist.destroy_process_group()
+
+    # output = torch.zeros(steps_per_rank,data.shape[1],data.shape[2],data.shape[3],data.shape[4]).to(rank)
+    # with torch.no_grad():
+    #     for i in tqdm(range(rank * steps_per_rank, min((rank + 1) * steps_per_rank, num_data_points)),disable=(rank!=0)):
+    #         batch_input  = data[i:i+1]
+    #         batch_output  = model(batch_input.to(rank))
+    #         output[i - rank * steps_per_rank] = batch_output
+    # gathered_outputs = [torch.zeros_like(output) for _ in range(world_size)]
+    # dist.all_gather(gathered_outputs, output)
+    # dist.barrier()
+    # if rank == 0:
+    #     gathered_outputs = torch.cat(gathered_outputs).cpu().numpy()
+    #     gathered_outputs = gathered_outputs[:data.shape[0]]
+    #     np.save(tmp_data_path,gathered_outputs)
+    # dist.destroy_process_group()
