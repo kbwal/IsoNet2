@@ -17,15 +17,21 @@ def find_unused_port():
     sock.close()
     return port
 class Net:
-    def __init__(self, method=None, arch = 'unet-default', cube_size=96):
-        if method != None:
+    def __init__(self, method=None, arch = 'unet-default', cube_size = 96, pretrained_model=None):
+
+        if pretrained_model != None and pretrained_model != "None":
+            self.load(pretrained_model)
+        else:
             self.initialize(method, arch,cube_size)
         torch.backends.cudnn.benchmark = True
 
     
-    def initialize(self, method='regular', arch = 'unet-default', cube_size=96):
+    def initialize(self, method='regular', arch = 'unet-default', cube_size = 96):
         
         self.arch = arch
+        self.method = method
+        self.cube_size = cube_size
+
         if self.arch == 'unet-default':
             from .unet import Unet
             self.model = Unet(filter_base = 64,unet_depth=4, add_last=True)
@@ -38,34 +44,24 @@ class Net:
         elif self.arch == 'HSFormer':
             from IsoNet.models.HSFormer import swin_tiny_patch4_window8
             self.model = swin_tiny_patch4_window8(img_size=cube_size, num_classes =1)
-
-        self.method = method
-        # if method == "regular":
-        #     from IsoNet.models.strategy.regular import ddp_train, ddp_predict
-        # elif method == "n2n":
-        #     from IsoNet.models.strategy.n2n import ddp_train, ddp_predict
-        # elif method == "spisonet":
-        #     #TODO
-        #     #from IsoNet.models.strategy.spisonet import ddp_train, ddp_predict
-        #     pass
-        # self.ddp_train = ddp_train
-        # self.ddp_predict = ddp_predict
+        else:
+            print("methods", method)
 
 
         self.world_size = torch.cuda.device_count()
         self.port_number = str(find_unused_port())
         logging.info(f"Port number: {self.port_number}")
 
-
         self.metrics = {"average_loss":[],
                         "avg_val_loss":[] }
 
     def load(self, path):
         checkpoint = torch.load(path)
-        method = checkpoint['method']
-        arch = checkpoint['arch']
+        self.method = checkpoint['method']
+        self.arch = checkpoint['arch']
+        self.cube_size = checkpoint['cube_size']
 
-        self.initialize(method, arch)
+        self.initialize(self.method, self.arch, self.cube_size)
 
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.metrics = checkpoint['metrics']

@@ -40,7 +40,7 @@ class Train_sets_n2n(Dataset):
     Dataset class to load tomograms and provide subvolumes for n2n and spisonet methods.
     """
 
-    def __init__(self, tomo_star, method="n2n", cube_size=64):
+    def __init__(self, tomo_star, method="n2n", cube_size=64, input_column = "rlnTomoName"):
         self.star = starfile.read(tomo_star)
         self.method = method
         self.n_samples_per_tomo = []
@@ -55,6 +55,7 @@ class Train_sets_n2n(Dataset):
         self.std = []
         self.mw_list = []
         self.n_tomos = len(self.star)
+        self.input_column = input_column
 
         # Initialize data from starfile
         self._initialize_data()
@@ -73,27 +74,34 @@ class Train_sets_n2n(Dataset):
             coords = self.create_random_coords(mask.shape, mask, self.n_samples_per_tomo)
             self.coords.append(coords)
 
-            if self.method in ['isonet2']:
+            if self.method in ['isonet2','isonet2-n2n']:
                 min_angle, max_angle = row['rlnTiltMin'], row['rlnTiltMax']
                 self.mw_list.append(self._compute_missing_wedge(self.sample_shape[0], min_angle, max_angle))
 
     def _load_statistics_and_mask(self, row, column_name_list):
         """Load tomogram data and corresponding mask."""
-        if self.method in ['isonet2', 'n2n']:
-            self.tomo_paths_even.append(row['rlnTomoReconstructedTomogramHalf1'])
-            self.tomo_paths_odd.append(row['rlnTomoReconstructedTomogramHalf2'])
-            tomo_data =  mrcfile.mmap(row['rlnTomoReconstructedTomogramHalf1'], mode='r', permissive=True).data
-            tomo_data2 = mrcfile.mmap(row['rlnTomoReconstructedTomogramHalf2'], mode='r', permissive=True).data
-            Z = tomo_data.data.shape[0]
-            mean = [np.mean(tomo_data[Z//2-16:Z//2+16]), np.mean(tomo_data2[Z//2-16:Z//2+16])]
-            std = [np.std(tomo_data[Z//2-16:Z//2+16]), np.std(tomo_data2[Z//2-16:Z//2+16])]
+        if self.method in ['isonet2-n2n','n2n']:
+            even_column = 'rlnTomoReconstructedTomogramHalf1'
+            odd_column = 'rlnTomoReconstructedTomogramHalf2'
         else:
-            self.tomo_paths.append(row['rlnTomoName'])
-            #tomo_data, _ = read_mrc(row['rlnTomoName'])
-            tomo_data =  mrcfile.mmap(row['rlnTomoName'], mode='r', permissive=True).data
-            Z = tomo_data.data.shape[0]
-            mean = [np.mean(tomo_data[Z//2-16:Z//2+16])]
-            std = [np.std(tomo_data[Z//2-16:Z//2+16])]           
+            even_column = self.input_column
+            odd_column = self.input_column
+
+        #if self.method in ['isonet2', 'n2n']:
+        self.tomo_paths_even.append(row[even_column])
+        self.tomo_paths_odd.append(row[odd_column])
+        tomo_data =  mrcfile.mmap(row[even_column], mode='r', permissive=True).data
+        tomo_data2 = mrcfile.mmap(row[odd_column], mode='r', permissive=True).data
+        Z = tomo_data.data.shape[0]
+        mean = [np.mean(tomo_data[Z//2-16:Z//2+16]), np.mean(tomo_data2[Z//2-16:Z//2+16])]
+        std = [np.std(tomo_data[Z//2-16:Z//2+16]), np.std(tomo_data2[Z//2-16:Z//2+16])]
+        # else:
+        #     self.tomo_paths.append(row['rlnTomoName'])
+        #     #tomo_data, _ = read_mrc(row['rlnTomoName'])
+        #     tomo_data =  mrcfile.mmap(row['rlnTomoName'], mode='r', permissive=True).data
+        #     Z = tomo_data.data.shape[0]
+        #     mean = [np.mean(tomo_data[Z//2-16:Z//2+16])]
+        #     std = [np.std(tomo_data[Z//2-16:Z//2+16])]           
 
         self.mean.append(mean)
         self.std.append(std)
@@ -154,7 +162,7 @@ class Train_sets_n2n(Dataset):
         tomo_index, coord_index = divmod(idx, self.n_samples_per_tomo)
         z, y, x = self.coords[tomo_index][coord_index]
 
-        if self.method in ['n2n', 'isonet2']:
+        if self.method in ['n2n', 'isonet2','isonet2-n2n']:
             even_subvolume = self.load_and_normalize(self.tomo_paths_even, tomo_index, z, y, x, eo_idx=0)
             odd_subvolume = self.load_and_normalize(self.tomo_paths_odd, tomo_index, z, y, x, eo_idx=1)
 
@@ -163,17 +171,17 @@ class Train_sets_n2n(Dataset):
                 np.array(odd_subvolume, dtype=np.float32)[np.newaxis, ...]
             )
 
-            if self.method in ['isonet2']:
+            if self.method in ['isonet2','isonet2-n2n']:
                 return x, y, self.mw_list[tomo_index][np.newaxis, ...]
             return x, y
         
-        elif self.method == 'spisonet-single':
-            even_subvolume = self.load_and_normalize(self.tomo_paths, tomo_index, z, y, x, eo_idx=0)
-            x = np.array(even_subvolume, dtype=np.float32)[np.newaxis, ...]
-            return x, self.mw_list[tomo_index][np.newaxis, ...]
+        # elif self.method == 'spisonet-single':
+        #     even_subvolume = self.load_and_normalize(self.tomo_paths, tomo_index, z, y, x, eo_idx=0)
+        #     x = np.array(even_subvolume, dtype=np.float32)[np.newaxis, ...]
+        #     return x, self.mw_list[tomo_index][np.newaxis, ...]
 
     def close(self):
-        for even, odd in zip(self.tomos_even, self.tomos_odd):
+        for even, odd in zip(self.tomo_paths_even, self.tomo_paths_odd):
             even.close()
             odd.close()
 

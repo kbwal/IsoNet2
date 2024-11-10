@@ -53,18 +53,15 @@ def ddp_train(rank, world_size, port_number, model, training_params):
     # from chatGPT: The DistributedSampler shuffles the indices of the entire dataset, not just the portion assigned to a specific GPU. 
     if training_params['method'] == 'regular':
         from IsoNet.models.data_sequence import Train_sets_regular
-        train_dataset = Train_sets_regular(training_params['data_path'])
+        train_dataset = Train_sets_regular(training_params['star_file'])
 
-    elif training_params['method'] in ['n2n', 'isonet2']:
+    elif training_params['method'] in ['n2n', 'isonet2', 'isonet2-n2n']:
         from IsoNet.models.data_sequence import Train_sets_n2n
         if rank == 0:
             print("calculate subtomograms position")
-        train_dataset = Train_sets_n2n(training_params['data_path'],method=training_params['method'], cube_size=training_params['cube_size'])
+        train_dataset = Train_sets_n2n(training_params['star_file'],method=training_params['method'], 
+                                       cube_size=training_params['cube_size'], input_column=training_params['input_column'])
         from IsoNet.utils.rotations import rotation_list
-        mwshift = np.ones((training_params['cube_size'])*3, dtype=np.float32)
-
-    # print(train_dataset.tomo_paths_even)
-    # print(train_dataset.tomo_paths_odd)
 
     if world_size > 1:
         train_sampler = DistributedSampler(train_dataset, shuffle=True, drop_last=True)
@@ -73,7 +70,7 @@ def ddp_train(rank, world_size, port_number, model, training_params):
 
     train_loader = torch.utils.data.DataLoader(
         train_dataset, batch_size=batch_size_gpu, persistent_workers=True,
-        num_workers=4, pin_memory=True, sampler=train_sampler)
+        num_workers=training_params["ncpus"], pin_memory=True, sampler=train_sampler)
     
     # if torch.__version__ >= "2.0.0":
     #     GPU_capability = torch.cuda.get_device_capability()
@@ -111,9 +108,11 @@ def ddp_train(rank, world_size, port_number, model, training_params):
                     preds = model(x1)  
                     loss = loss_fn(x2,preds)
 
-                elif training_params['method'] == "isonet2":
+                elif training_params['method'] in ["isonet2",'isonet2-n2n']:
                     # x [B, C, Z, Y, X]
                     x1, x2, mw = batch[0].cuda(), batch[1].cuda(), batch[2].cuda()
+                    rot = random.choice(rotation_list)
+
                     optimizer.zero_grad(set_to_none=True)
 
                     std_org = x1.std()
@@ -122,10 +121,10 @@ def ddp_train(rank, world_size, port_number, model, training_params):
                     # TODO whether need to apply wedge to x1
                     with torch.no_grad():
                         preds = model(x1)
+                    # TODO whether need to apply wedge to x1
                     subtomos = apply_F_filter_torch(preds, 1-mw) + apply_F_filter_torch(x1, mw)
 
 
-                    rot = random.choice(rotation_list)
                     rotated_subtomo = rotate_vol(subtomos, rot)
                     mw_rotated_subtomos=apply_F_filter_torch(rotated_subtomo,mw)
                     rotated_mw = rotate_vol(mw, rot)
@@ -134,7 +133,6 @@ def ddp_train(rank, world_size, port_number, model, training_params):
                                                 *std_org + mean_org
                     pred_y = model(mw_rotated_subtomos)
                     
-
                     # if i_batch%100 == 0:
                     #     print(f"x1 {x1.mean()} {x1.std()}")
                     #     print(f"x2 {x2.mean()} {x2.std()}")
@@ -145,13 +143,13 @@ def ddp_train(rank, world_size, port_number, model, training_params):
                     # if rank == np.random.randint(0, world_size):
                     #     debug_matrix(x1, filename='debug_x1.mrc')
                     #     debug_matrix(subtomos, filename='debug_subtomos.mrc')
-
                     #     debug_matrix(pred_y, filename='debug_pred_y.mrc')
                     #     debug_matrix(rotated_subtomo, filename='debug_rotated_subtomo.mrc')
                     #     debug_matrix(mw_rotated_subtomos, filename='debug_mw_rotated_subtomos.mrc')
                     #     debug_matrix(x2_rot, filename='debug_x2_rot.mrc')
                     #     debug_matrix(mw, filename='debug_mw.mrc')
                     #     debug_matrix(rotated_mw, filename='debug_rotated_mw.mrc')
+                    
                     if training_params['gamma'] > 0:
                         loss = masked_loss(pred_y, x2_rot, rotated_mw, mw, mw_weight=training_params['gamma'])
                     else:
@@ -204,6 +202,7 @@ def ddp_train(rank, world_size, port_number, model, training_params):
                     'arch':training_params['arch'],
                     'model_state_dict': model.module.state_dict(),
                     'metrics': metrics,
+                    'cube_size': training_params['cube_size']
                     }, outmodel_path)
             else:
                 torch.save({
@@ -211,6 +210,7 @@ def ddp_train(rank, world_size, port_number, model, training_params):
                     'arch':training_params['arch'],
                     'model_state_dict': model.state_dict(),
                     'metrics': metrics,
+                    'cube_size': training_params['cube_size']
                     }, outmodel_path)                
     if world_size > 1:
         dist.destroy_process_group()
