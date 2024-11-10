@@ -84,12 +84,12 @@ class ISONET:
             even_files_names = sorted(os.listdir(even))
             even_files = [f"{even}/{item}" for item in even_files_names]
             odd_files = sorted(os.listdir(odd))
-            odd_files = [f"{even}/{item}" for item in odd_files]
+            odd_files = [f"{odd}/{item}" for item in odd_files]
             create_folder(full)
             for i in range(len(even_files)):
                 tomo_even, voxel_size = read_mrc(even_files[i])
                 tomo_odd, _ = read_mrc(odd_files[i])
-                write_mrc(f'{full}/{os.path.splitext(even_files_names)[0]}_full.mrc',tomo_odd+tomo_even, voxel_size=voxel_size)
+                write_mrc(f'{full}/{os.path.splitext(even_files_names[i])[0]}_full.mrc',tomo_odd+tomo_even, voxel_size=voxel_size)
 
         if full == "None" and create_average:
             create_average(even, odd)
@@ -437,10 +437,7 @@ class ISONET:
                 model: str, 
                 output_dir: str='./corrected_tomos', 
                 gpuID: str = None, 
-                cube_size:int=64,
-                crop_size:int=96,
                 input_column: str = "rlnDeconvTomoName",
-                batch_size:int=None,
                 log_level: str="info", 
                 tomo_idx=None):
         """
@@ -472,45 +469,47 @@ class ISONET:
         import numpy as np
         from IsoNet.utils.processing import normalize
 
-        mkfolder(output_dir, remove=False)
-        network = Net()
-        network.load(model)
+        create_folder(output_dir, remove=False)
+        network = Net(pretrained_model=model)
+        cube_size = network.cube_size
+        inner_cube_size = cube_size//3*2
+
+
         star = starfile.read(star_file)
 
         out_column = "rlnCorrectedTomoName"
         if network.method == 'n2n':
             out_column = "rlnDenoisedTomoName"
+
         if out_column not in star.columns:
             star[out_column] = None
-        if network.method == 'regular':
-            if out_column not in star.columns:
-                star[out_column] = None
+
+        if network.method in ['regular','isonet']:
             for index, tomo_row in star.iterrows():
                 tomo, _ = read_mrc(tomo_row[input_column])
                 tomo = normalize(tomo*-1,percentile=False)
-                outData = network.predict_map(tomo, output_dir,cube_size=cube_size, crop_size=crop_size).astype(np.float32) #train based on init model and save new one as model_iter{num_iter}.h5
+                outData = network.predict_map(tomo, output_dir, cube_size=inner_cube_size, crop_size=cube_size).astype(np.float32) #train based on init model and save new one as model_iter{num_iter}.h5
                 file_base_name = os.path.basename(tomo_row[input_column])
                 file_name, file_extension = os.path.splitext(file_base_name)
-                out_file_name = f"{output_dir}/corrected_{file_name}.mrc"
+                out_file_name = f"{output_dir}/corrected_{network.method}_{network.arch}_{file_name}.mrc"
                 write_mrc(out_file_name, outData*-1)        
                 star.at[index, out_column] = out_file_name
             starfile.write(star,star_file)
 
-        if network.method in ['n2n','spisonet','spisonet-ddw']:
-
+        if network.method in ['n2n','isonet-n2n']:
             for index, tomo_row in star.iterrows():
                 tomo1, _ = read_mrc(tomo_row["rlnTomoReconstructedTomogramHalf1"])
                 tomo1 = normalize(tomo1*-1,percentile=False)
-                outData1 = network.predict_map(tomo1, output_dir,cube_size=cube_size, crop_size=crop_size).astype(np.float32) #train based on init model and save new one as model_iter{num_iter}.h5
+                outData1 = network.predict_map(tomo1, output_dir,cube_size=inner_cube_size, crop_size=cube_size).astype(np.float32) #train based on init model and save new one as model_iter{num_iter}.h5
 
                 tomo2, _ = read_mrc(tomo_row["rlnTomoReconstructedTomogramHalf2"])
                 tomo2 = normalize(tomo2*-1,percentile=False)
-                outData2 = network.predict_map(tomo2, output_dir,cube_size=cube_size, crop_size=crop_size).astype(np.float32) #train based on init model and save new one as model_iter{num_iter}.h5
+                outData2 = network.predict_map(tomo2, output_dir,cube_size=inner_cube_size, crop_size=cube_size).astype(np.float32) #train based on init model and save new one as model_iter{num_iter}.h5
                                 
                 outData = (outData1 + outData2) * (-0.5)
                 file_base_name = os.path.basename(tomo_row['rlnTomoReconstructedTomogramHalf1'])
                 file_name, file_extension = os.path.splitext(file_base_name)
-                out_file_name = f"{output_dir}/corrected_{network.method}_{file_name}.mrc"
+                out_file_name = f"{output_dir}/corrected_{network.method}_{network.arch}_{file_name}.mrc"
                 write_mrc(out_file_name, outData)        
                 star.at[index, out_column] = out_file_name
             starfile.write(star,star_file)            
@@ -518,10 +517,11 @@ class ISONET:
     def refine(self, 
                    star_file: str,
                    gpuID: str=None,
-                   arch='unet-default',
-                   #ncpus: int=16, 
-                   method = "isonet2",
+                   arch: str='unet-default',
+                   ncpus: int=4, 
+                   method: str="isonet2-n2n",
                    output_dir: str="isonet_maps",
+                   input_column: str= 'rlnDeconvTomoName',
                    pretrained_model: str=None,
                    cube_size: int=80,
 
@@ -546,15 +546,14 @@ class ISONET:
 
         print(f"method {method}")
         from IsoNet.models.network import Net
-        network = Net(method=method, arch=arch, cube_size=cube_size)
-        if pretrained_model != None and pretrained_model != "None":
-            network.load(pretrained_model)
-
+        network = Net(method=method, arch=arch, cube_size=cube_size, pretrained_model=pretrained_model)
 
         training_params = {
             "method":method,
+            "input_column": input_column,
             "arch": arch,
-            "data_path":star_file,
+            "ncpus": ncpus,
+            "star_file":star_file,
             "output_dir":output_dir,
             "batch_size":batch_size,
             "acc_batches": acc_batches,
