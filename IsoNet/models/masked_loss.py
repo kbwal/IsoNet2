@@ -1,6 +1,8 @@
+# code from this file is modified from deepdewedge
 
 import torch
 from torch import fft
+
 
 # This is essence of deepdewedge
 # inside_mw_loss is for IsoNet
@@ -47,3 +49,5 @@ def apply_fourier_mask_to_tomo(tomo, mask, output="real"):
         return vol_filt.real
     elif output == "complex":
         return vol_filt
+
+

@@ -524,12 +524,12 @@ class ISONET:
                    input_column: str= 'rlnDeconvTomoName',
                    pretrained_model: str=None,
                    cube_size: int=80,
-
+                
                    epochs: int=50,
                    batch_size: int=None, 
                    acc_batches: int=2,
                    learning_rate: float=3e-4,
-
+                   random_rotation: bool=True, 
                    gamma: float=2,
                    ):
         create_folder(output_dir)
@@ -563,6 +563,7 @@ class ISONET:
             "mixed_precision":False,
             "cube_size": cube_size,
             "gamma": gamma,
+            "random_rotation":random_rotation
         }
 
         network.train(training_params) #train based on init model and save new one as model_iter{num_iter}.h5

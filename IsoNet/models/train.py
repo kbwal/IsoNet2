@@ -10,8 +10,7 @@ from IsoNet.utils.utils import debug_matrix
 import random
 from IsoNet.models.masked_loss import masked_loss
 from IsoNet.utils.plot_metrics import plot_metrics
-
-
+from IsoNet.utils.rotations import rotation_list, sample_rot_axis_and_angle, rotate_vol_around_axis_torch
 # def apply_filter(data, mwshift):
 #     # mwshift [x, y, z]
 #     # data [x, y, z]
@@ -61,7 +60,7 @@ def ddp_train(rank, world_size, port_number, model, training_params):
             print("calculate subtomograms position")
         train_dataset = Train_sets_n2n(training_params['star_file'],method=training_params['method'], 
                                        cube_size=training_params['cube_size'], input_column=training_params['input_column'])
-        from IsoNet.utils.rotations import rotation_list
+        
 
     if world_size > 1:
         train_sampler = DistributedSampler(train_dataset, shuffle=True, drop_last=True)
@@ -111,7 +110,12 @@ def ddp_train(rank, world_size, port_number, model, training_params):
                 elif training_params['method'] in ["isonet2",'isonet2-n2n']:
                     # x [B, C, Z, Y, X]
                     x1, x2, mw = batch[0].cuda(), batch[1].cuda(), batch[2].cuda()
-                    rot = random.choice(rotation_list)
+                    if training_params['random_rotation'] == True:
+                        rotate = rotate_vol_around_axis_torch
+                        rot = sample_rot_axis_and_angle()
+                    else:
+                        rotate = rotate_vol
+                        rot = random.choice(rotation_list)
 
                     optimizer.zero_grad(set_to_none=True)
 
@@ -125,14 +129,21 @@ def ddp_train(rank, world_size, port_number, model, training_params):
                     subtomos = apply_F_filter_torch(preds, 1-mw) + apply_F_filter_torch(x1, mw)
 
 
-                    rotated_subtomo = rotate_vol(subtomos, rot)
+                    rotated_subtomo = rotate(subtomos, rot)
                     mw_rotated_subtomos=apply_F_filter_torch(rotated_subtomo,mw)
-                    rotated_mw = rotate_vol(mw, rot)
-                    x2_rot = rotate_vol(x2, rot)
+                    rotated_mw = rotate(mw, rot)
+                    x2_rot = rotate(x2, rot)
                     mw_rotated_subtomos = (mw_rotated_subtomos - mw_rotated_subtomos.mean())/mw_rotated_subtomos.std() \
                                                 *std_org + mean_org
                     pred_y = model(mw_rotated_subtomos)
                     
+
+                    
+                    if training_params['gamma'] > 0:
+                        loss = masked_loss(pred_y, x2_rot, rotated_mw, mw, mw_weight=training_params['gamma'])
+                    else:
+                        pred_y_new = apply_F_filter_torch(pred_y,rotated_mw)
+                        loss = loss_fn(pred_y_new,x2_rot)
                     # if i_batch%100 == 0:
                     #     print(f"x1 {x1.mean()} {x1.std()}")
                     #     print(f"x2 {x2.mean()} {x2.std()}")
@@ -140,21 +151,16 @@ def ddp_train(rank, world_size, port_number, model, training_params):
                     #     print(f"x2_rot {x2_rot.mean()} {x2_rot.std()}")
                     #     print(f"pred_y {pred_y.mean()} {pred_y.std()}")
                     #     print(f"pred_y_new {pred_y_new.mean()} {pred_y_new.std()}")
-                    # if rank == np.random.randint(0, world_size):
-                    #     debug_matrix(x1, filename='debug_x1.mrc')
-                    #     debug_matrix(subtomos, filename='debug_subtomos.mrc')
-                    #     debug_matrix(pred_y, filename='debug_pred_y.mrc')
-                    #     debug_matrix(rotated_subtomo, filename='debug_rotated_subtomo.mrc')
-                    #     debug_matrix(mw_rotated_subtomos, filename='debug_mw_rotated_subtomos.mrc')
-                    #     debug_matrix(x2_rot, filename='debug_x2_rot.mrc')
-                    #     debug_matrix(mw, filename='debug_mw.mrc')
-                    #     debug_matrix(rotated_mw, filename='debug_rotated_mw.mrc')
-                    
-                    if training_params['gamma'] > 0:
-                        loss = masked_loss(pred_y, x2_rot, rotated_mw, mw, mw_weight=training_params['gamma'])
-                    else:
-                        pred_y_new = apply_F_filter_torch(pred_y,rotated_mw)
-                        loss = loss_fn(pred_y_new,x2_rot)
+                    if rank == np.random.randint(0, world_size):
+                        debug_matrix(x1, filename='debug_x1.mrc')
+                        debug_matrix(subtomos, filename='debug_subtomos.mrc')
+                        debug_matrix(pred_y, filename='debug_pred_y.mrc')
+                        debug_matrix(pred_y_new, filename='debug_pred_y_new.mrc')
+                        debug_matrix(rotated_subtomo, filename='debug_rotated_subtomo.mrc')
+                        debug_matrix(mw_rotated_subtomos, filename='debug_mw_rotated_subtomos.mrc')
+                        debug_matrix(x2_rot, filename='debug_x2_rot.mrc')
+                        debug_matrix(mw, filename='debug_mw.mrc')
+                        debug_matrix(rotated_mw, filename='debug_rotated_mw.mrc')
 
                 
                 loss = loss / training_params['acc_batches']
