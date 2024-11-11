@@ -531,7 +531,7 @@ class ISONET:
                    random_rotation: bool=True, 
                    gamma: float=2,
                    apply_mw_x1: bool=False, 
-                   compile_model: bool=True
+                   compile_model: bool=False
                    ):
         create_folder(output_dir)
 
