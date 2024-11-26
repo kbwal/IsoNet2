@@ -159,10 +159,7 @@ class Train_sets_n2n(Dataset):
                                     phaseflipped=self.isCTFflipped, phaseshift=0,length=self.cube_size)
         return ctf3d, wiener3d
 
-    def augment(self, x, y):
-        """
-        Data augmentation by randomly swapping input and target volumes.
-        """
+    def random_swap(self, x, y):
         if np.random.rand() > 0.5:
             return y, x
         return x, y
@@ -187,7 +184,7 @@ class Train_sets_n2n(Dataset):
         even_subvolume = self.load_and_normalize(self.tomo_paths_even, tomo_index, z, y, x, eo_idx=0)
         odd_subvolume = self.load_and_normalize(self.tomo_paths_odd, tomo_index, z, y, x, eo_idx=1)
 
-        x, y = self.augment(
+        x, y = self.random_swap(
             np.array(even_subvolume, dtype=np.float32)[np.newaxis, ...], 
             np.array(odd_subvolume, dtype=np.float32)[np.newaxis, ...]
         )
