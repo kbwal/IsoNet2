@@ -173,7 +173,7 @@ class Net:
             from IsoNet.models.data_sequence import Train_sets_n2n
             train_dataset = Train_sets_n2n(training_params['star_file'],method=training_params['method'], 
                                         cube_size=training_params['cube_size'], input_column=training_params['input_column'],\
-                                        split=training_params['split'], noise_dir=noise_dir)
+                                        split=training_params['split'], noise_dir=noise_dir, start_bt_size=training_params["start_bt_size"])
         try: 
             if self.world_size > 1:
                 mp.spawn(ddp_train, args=(self.world_size, self.port_number, self.model, train_dataset, training_params), nprocs=self.world_size)

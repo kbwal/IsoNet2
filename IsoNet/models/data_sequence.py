@@ -40,7 +40,7 @@ class Train_sets_n2n(Dataset):
     Dataset class to load tomograms and provide subvolumes for n2n and spisonet methods.
     """
 
-    def __init__(self, tomo_star, method="n2n", cube_size=64, input_column = "rlnTomoName", split="full", noise_dir=None):
+    def __init__(self, tomo_star, method="n2n", cube_size=64, input_column = "rlnTomoName", split="full", noise_dir=None, start_bt_size=48):
         self.star = starfile.read(tomo_star)
         self.method = method
         self.n_tomos = len(self.star)
@@ -58,6 +58,7 @@ class Train_sets_n2n(Dataset):
         self.mw_list = []
         self.wiener_list = []
         self.CTF_list = []
+        self.start_bt_size=start_bt_size
 
         self._initialize_data()
         self.length = sum([coords.shape[0] for coords in self.coords])
@@ -87,8 +88,12 @@ class Train_sets_n2n(Dataset):
             
             self.coords.append(coords)
 
-            min_angle, max_angle = row['rlnTiltMin'], row['rlnTiltMax']
-            self.mw_list.append(self._compute_missing_wedge(self.cube_size, min_angle, max_angle))
+            min_angle, max_angle, tilt_step = row['rlnTiltMin'], row['rlnTiltMax'], row['rlnTiltStep']
+            if tilt_step not in ["None", None]:
+                start_dim = self.start_bt_size/tilt_step
+            else:
+                start_dim = 100000
+            self.mw_list.append(self._compute_missing_wedge(self.cube_size, min_angle, max_angle, tilt_step, start_dim))
             CTF_vol, wiener_vol = self._compute_CTF_vol(row)
             self.wiener_list.append(wiener_vol)
             self.CTF_list.append(CTF_vol)
@@ -139,9 +144,9 @@ class Train_sets_n2n(Dataset):
 
         half_y = y_max // 2
         if self.split == "top":
-            mask[:,half_y-half_size:y_max,:] = 0
+            mask[:,half_y:y_max,:] = 0
         elif self.split == "bottom":
-            mask[:,0:half_y+half_size,:] = 0
+            mask[:,0:half_y,:] = 0
 
         # Flatten the mask and randomly sample indices
 
@@ -157,10 +162,10 @@ class Train_sets_n2n(Dataset):
         # rand_inds = [v[sample_inds] for v in valid_inds]
         # return np.stack(rand_inds, -1)
 
-    def _compute_missing_wedge(self, cube_size, min_angle, max_angle):
+    def _compute_missing_wedge(self, cube_size, min_angle, max_angle, tilt_step, start_dim):
         """Compute the missing wedge mask for given tilt angles."""
         from IsoNet.utils.missing_wedge import mw3D
-        mw = mw3D(cube_size, missingAngle=[90 + min_angle, 90 - max_angle])
+        mw = mw3D(cube_size, missingAngle=[90 + min_angle, 90 - max_angle], tilt_step=tilt_step, start_dim=start_dim)
         return mw
 
     def _compute_CTF_vol(self, row):
@@ -180,12 +185,15 @@ class Train_sets_n2n(Dataset):
             return y, x
         return x, y
 
-    def load_and_normalize(self, tomo_paths, tomo_index, z, y, x, eo_idx):
+    def load_and_normalize(self, tomo_paths, tomo_index, z, y, x, eo_idx, invert=True):
         """Load and normalize a subvolume from a tomogram."""
         half_size = self.cube_size // 2
         with mrcfile.mmap(tomo_paths[tomo_index], mode='r', permissive=True) as tomo:
             subvolume = tomo.data[z-half_size:z+half_size, y-half_size:y+half_size, x-half_size:x+half_size]
-        return (subvolume - self.mean[tomo_index][eo_idx]) / self.std[tomo_index][eo_idx]
+        if invert:
+            return (self.mean[tomo_index][eo_idx] - subvolume) / self.std[tomo_index][eo_idx]
+        else:
+            return (subvolume - self.mean[tomo_index][eo_idx]) / self.std[tomo_index][eo_idx]
 
     def __len__(self):
         return self.length
