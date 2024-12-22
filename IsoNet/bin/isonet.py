@@ -138,6 +138,7 @@ class ISONET:
         # tilt angle parameters
         add_param("None", "rlnTiltMin",-60)
         add_param("None", "rlnTiltMax",60)
+        add_param("None", "rlnTiltStep",3)
 
         # subtomogram coordinates
         add_param(coordinate_folder, 'rlnBoxFile', "None")
@@ -328,7 +329,7 @@ class ISONET:
                 output_dir: str='./corrected_tomos', 
                 gpuID: str = None, 
                 input_column: str = "rlnDeconvTomoName",
-                apply_mw_x1: bool=True, 
+                apply_mw_x1: bool=False, 
                 correct_CTF: bool=False,
                 isCTFflipped: bool=False,
                 log_level: str="info", 
@@ -379,17 +380,17 @@ class ISONET:
 
         def normalize_and_predict(network_model, tomo_name, F_mask=None):
             tomo, _ = read_mrc(tomo_name)
-            tomo = normalize(tomo)
+            # tomo = normalize(tomo*-1)
             Z = tomo.shape[0]
-            # mean = np.mean(tomo.data[Z//2-16:Z//2+16])
-            # std = np.std(tomo.data[Z//2-16:Z//2+16])
-            # tomo = (mean-tomo)/std
+            mean = np.mean(tomo.data[Z//2-16:Z//2+16])
+            std = np.std(tomo.data[Z//2-16:Z//2+16])
+            tomo = (mean-tomo)/std
             outData = network_model.predict_map(tomo, output_dir, cube_size=inner_cube_size, crop_size=cube_size, \
                                           F_mask=F_mask)
             if len(outData) == 2:
                 return [x.astype(np.float32)*-1 for x in outData]
             else:
-                return outData.astype(np.float32)# * -1
+                return outData.astype(np.float32) * -1
         
         def get_base_filename(tomo_name):
             file_base_name = os.path.basename(tomo_name)
@@ -489,6 +490,9 @@ class ISONET:
                    correct_CTF: bool=False,
                    isCTFflipped: bool=False,
 
+                   correct_between_tilts: bool=True,
+                   start_bt_size: int=128,
+
                    noise_level: float=0.2, 
                    noise_mode: str="ramp",
 
@@ -559,7 +563,9 @@ class ISONET:
             'correct_CTF':correct_CTF,
             "isCTFflipped": isCTFflipped,
             "starting_epoch": 0,
-            "noise_level": noise_level
+            "noise_level": noise_level,
+            "correct_between_tilts":correct_between_tilts,
+            "start_bt_size":start_bt_size,
         }
         if split_halves:
             from IsoNet.models.network import DuoNet
@@ -581,6 +587,29 @@ class ISONET:
                 self.predict(star_file=star_file, model=model_file, output_dir=output_dir, gpuID=gpuID, \
                              correct_CTF=correct_CTF,isCTFflipped=isCTFflipped) 
                 #f"{training_params['output_dir']}/network_{training_params['arch']}_{training_params['method']}.pt"
+
+
+    def simulate_noise_F(self, size=128, tilt_step=3, repeats=1000, ncpus=51):
+        from IsoNet.utils.WBP import backprojection
+        from IsoNet.utils.processing import normalize
+        from joblib import Parallel, delayed
+        #result = np.zeros((ctf2d.shape[1], ctf2d.shape[1], ctf2d.shape[1]), dtype=np.float32)
+        angles = np.arange(-90,90,tilt_step)
+        def simulate_one():
+            noise = np.random.normal(size=(len(angles), size,size))
+            out = backprojection(noise, angles, filter_name='ramp')
+            F_result = np.fft.fftshift(np.fft.fftn(out))
+            out = np.abs(F_result).astype(np.float32)
+            #out = (np.real(F_result)).astype(np.float32)
+            return out
+        results = Parallel(n_jobs=ncpus)(delayed(simulate_one)() for _ in range(repeats))
+        result = np.average(results, axis=0)
+        result = np.average(result, axis=1)
+        result = normalize(result, percentile = True, pmin=33.0, pmax=66.0, clip=True)
+        out_name = f"simulated_F_{size}_{tilt_step}.mrc"
+        with mrcfile.new(out_name, overwrite=True) as mrc:
+             mrc.set_data(result)
+        return result
 
     def resize(self, star_file:str, apix: float=15, out_folder="tomograms_resized"):
         '''

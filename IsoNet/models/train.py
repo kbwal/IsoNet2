@@ -127,26 +127,35 @@ def ddp_train(rank, world_size, port_number, model, train_dataset, training_para
                     with torch.autocast("cuda", enabled=training_params["mixed_precision"]): 
                         preds = model(x1)
                         loss = loss_func(x2, preds)
+                        outside_mw_loss = loss
+                        inside_mw_loss = loss
 
                 elif training_params['method'] in ["isonet2",'isonet2-n2n']:
 
-                    if training_params['random_rotation'] == True:
+                    if training_params['random_rotation'] == True and random.random()<0.9:
                         rotate_func = rotate_vol_around_axis_torch
                         rot = sample_rot_axis_and_angle()
                     else:
+                        # this is IsoNet1 standards and was working well
                         rotate_func = rotate_vol
                         rot = random.choice(rotation_list)
 
                     std_org, mean_org = x1.std(), x1.mean()
-                    x1 = apply_F_filter_torch(x1, mw)
-                    x1 = normalize_percentage(x1)
+                    # x1 = apply_F_filter_torch(x1, mw)
+                    # x1 = normalize_percentage(x1)
 
                     # TODO whether need to apply wedge to x1
                     with torch.no_grad():
                         with torch.autocast("cuda", enabled=training_params["mixed_precision"]): 
                             preds = model(x1)
                     preds = preds.to(torch.float32)
-                    preds = normalize_percentage(preds)
+
+                    # test_add_noise_to_predict = False
+                    # if test_add_noise_to_predict:
+                    #     # I think this might be necesary to make preds has similar noise componient as the origional data
+                    #     noise_std = (std_org**2 * 1.5 - preds.std()**2)**0.5
+                    #     preds += torch.normal(0, max(0,noise_std), size=preds.shape).cuda()
+                    # preds = normalize_percentage(preds)
                     # need to confirm whether to float32 is necessary
                     if training_params['correct_CTF']:
                         preds = apply_F_filter_torch(preds, torch.abs(ctf))
@@ -155,7 +164,7 @@ def ddp_train(rank, world_size, port_number, model, train_dataset, training_para
                         subtomos = apply_F_filter_torch(preds, 1-mw) + apply_F_filter_torch(x1, mw)
                     else:
                         subtomos = apply_F_filter_torch(preds, 1-mw) + x1
-                    subtomos =  normalize_percentage(subtomos)
+                    # subtomos =  normalize_percentage(subtomos)
 
                     rotated_subtomo = rotate_func(subtomos, rot)
                     mw_rotated_subtomos=apply_F_filter_torch(rotated_subtomo,mw)
@@ -167,10 +176,10 @@ def ddp_train(rank, world_size, port_number, model, train_dataset, training_para
                     # This normalization need to be tested
                     # mw_rotated_subtomos = (mw_rotated_subtomos - mw_rotated_subtomos.mean(dim=(-3,-2,-1), keepdim=True))/mw_rotated_subtomos.std(dim=(-3,-2,-1), keepdim=True) \
                     #                             *std_org + mean_org
-                    # mean_new = mw_rotated_subtomos.mean()
-                    # std_new = mw_rotated_subtomos.std()
-                    # mw_rotated_subtomos = (mw_rotated_subtomos - mean_new)/ std_new\
-                    #                             *std_org + mean_org
+                    mean_new = mw_rotated_subtomos.mean()
+                    std_new = mw_rotated_subtomos.std()
+                    mw_rotated_subtomos = (mw_rotated_subtomos - mean_new)/ std_new\
+                                                *std_org + mean_org
                     # rotated_subtomo = (rotated_subtomo - mean_new)/ std_new\
                     #                             *std_org + mean_org
                     # print(mean_org,subtomos.mean(), rotated_subtomo.mean(), mw_rotated_subtomos.mean())
@@ -179,24 +188,31 @@ def ddp_train(rank, world_size, port_number, model, train_dataset, training_para
                     
                     if training_params['method'] == "isonet2" and training_params["noise_level"] > 0:
                         noise_vol = apply_F_filter_torch(noise_vol, mw)
-                        mw_rotated_subtomos += mw_rotated_subtomos.std() * noise_vol * training_params["noise_level"] / torch.std(noise_vol)# * random.random()
+                        mw_rotated_subtomos += std_org * noise_vol * training_params["noise_level"] / torch.std(noise_vol) * random.random()
 
                     with torch.autocast('cuda', enabled = training_params["mixed_precision"]): 
                         pred_y = model(mw_rotated_subtomos).to(torch.float32)
-                        if rank == np.random.randint(0, world_size):
-                            debug_matrix(preds, filename='debug_preds.mrc')
-                            debug_matrix(pred_y, filename='debug_pred_y.mrc')
-                            debug_matrix(x1, filename='debug_x1.mrc')
-                            debug_matrix(subtomos, filename='debug_subtomos.mrc')
-                            debug_matrix(rotated_subtomo, filename='debug_rotated_subtomo.mrc')
-                            debug_matrix(mw_rotated_subtomos, filename='debug_mw_rotated_subtomos.mrc')
-                            debug_matrix(mw, filename='debug_mw.mrc')
+                        # if rank == np.random.randint(0, world_size):
+                        #     debug_matrix(preds, filename='debug_preds.mrc')
+                        #     debug_matrix(pred_y, filename='debug_pred_y.mrc')
+                        #     debug_matrix(x1, filename='debug_x1.mrc')
+                        #     debug_matrix(subtomos, filename='debug_subtomos.mrc')
+                        #     debug_matrix(rotated_subtomo, filename='debug_rotated_subtomo.mrc')
+                        #     debug_matrix(mw_rotated_subtomos, filename='debug_mw_rotated_subtomos.mrc')
+                        #     debug_matrix(mw, filename='debug_mw.mrc')
+                        #     debug_matrix(rotated_mw, filename='debug_rotated_mw.mrc')
                         outside_mw_loss, inside_mw_loss = masked_loss(pred_y, x2_rot, rotated_mw, mw, loss_func = loss_func)
                         if training_params['method'] in ['isonet2-n2n','isonet2']: 
                             if training_params['mw_weight'] > 0:
                                 loss =  outside_mw_loss + training_params['mw_weight'] * inside_mw_loss
                             else:
                                 if training_params['method'] == 'isonet2':
+                                    test_norm = False
+                                    # This remains to be tested
+                                    # my guess is that direct loss calculation has normalization problem
+                                    if test_norm:
+                                        rotated_subtomo = (rotated_subtomo - mean_new)/ std_new\
+                                                            *std_org + mean_org
                                     loss = loss_func(pred_y,rotated_subtomo)
                                 else:
                                     loss =  inside_mw_loss                                
@@ -314,11 +330,7 @@ def ddp_predict(rank, world_size, port_number, model, data, tmp_data_path, F_mas
             if F_mask is not None:
                 F_m = torch.from_numpy(F_mask[np.newaxis,np.newaxis,:,:,:]).to(rank)
                 batch_input = apply_F_filter_torch(batch_input, F_m)
-            batch_input = normalize_percentage(batch_input)
             batch_output = model(batch_input).cpu()  # Move output to CPU immediately
-            if rank == 1:
-                debug_matrix(batch_input, filename='debug1_predict1.mrc')
-                debug_matrix(batch_output, filename='debug1_predict2.mrc')
 
             outputs.append(batch_output)
 
