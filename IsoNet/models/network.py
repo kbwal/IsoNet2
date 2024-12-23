@@ -165,7 +165,7 @@ class Net:
             train_dataset = Train_sets_regular(training_params['star_file'])
 
         elif training_params['method'] in ['n2n', 'isonet2', 'isonet2-n2n']:
-            if training_params['method'] in ['isonet2'] and training_params["noise_level"] > 0:
+            if training_params["noise_level"] > 0:
                 noise_dir = f'{training_params["output_dir"]}/noise_volumes'
             else:
                 noise_dir = None
