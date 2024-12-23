@@ -64,7 +64,7 @@ class Train_sets_n2n(Dataset):
         self.length = sum([coords.shape[0] for coords in self.coords])
         self.cumulative_samples = np.cumsum(self.n_samples_per_tomo)
         self.noise_dir = noise_dir
-        if method == "isonet2" and noise_dir != None:
+        if noise_dir != None:
             noise_files = os.listdir(noise_dir)
             self.noise_files = [os.path.join(noise_dir, file) for file in noise_files]
 
@@ -213,7 +213,7 @@ class Train_sets_n2n(Dataset):
             np.array(odd_subvolume, dtype=np.float32)[np.newaxis, ...]
         )
 
-        if self.method == "isonet2" and self.noise_dir != None:
+        if self.noise_dir != None:
             noise_file = random.choice(self.noise_files)
             noise_volume, _ = read_mrc(noise_file)
             #Noise along y axis is indenpedent, so that the y axis can be permutated.

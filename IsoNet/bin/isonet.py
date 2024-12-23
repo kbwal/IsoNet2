@@ -11,13 +11,6 @@ import numpy as np
 from IsoNet.utils.fileio import read_mrc, write_mrc, create_folder
 from IsoNet.utils.utils import parse_cpu, parse_gpu
 
-# types ={
-#     0: ["rlnTomoReconstructedTomogramHalf1", "rlnTomoReconstructedTomogramHalf2"],
-#     1: ["rlnTomoName"],
-#     2: ["rlnDeconvTomoName"],
-#     3: ["rlnDenoisedTomoName"],
-#     4: ["rlnCorrectedTomoName"],
-# }
 class ISONET:
     """
     ISONET: Train on tomograms and restore missing-wedge\n
@@ -33,10 +26,13 @@ class ISONET:
                      coordinate_folder: str='None',
                      star_name: str='tomograms.star',
                      pixel_size = 'auto', 
-                     defocus_folder: str="None",
+                    #  defocus_folder: str="None",
                      cs: float=2.7,
                      voltage: float=300,
                      ac: float=0.1,
+                     tilt_min: float=-60,
+                     tilt_max: float=60,
+                     tilt_step: float=3,
                      create_average: bool=True,
                      number_subtomos = 1000):
         """
@@ -114,31 +110,31 @@ class ISONET:
         else:           
             add_param("None", 'rlnPixelSize', pixel_size)
 
-        if defocus_folder in ['None', None]:
-            add_param("None", "rlnDefocus", 0)
-            add_param("None", "rlnVoltage", voltage)
-            add_param("None", "rlnSphericalAberration", cs)
-            add_param("None", "rlnAmplitudeContrast", ac)
-        else:
-            #TODO defocus file folder 
-            #from IsoNet.utils.fileio import read_defocus_file
-            #TODO decide the defocus file format from CTFFIND and GCTF
-            print("read from CTFFIND result not implimented")
+        # if defocus_folder in ['None', None]:
+        add_param("None", "rlnDefocus", 10000)
+        add_param("None", "rlnVoltage", voltage)
+        add_param("None", "rlnSphericalAberration", cs)
+        add_param("None", "rlnAmplitudeContrast", ac)
+        # else:
+        #     #TODO defocus file folder 
+        #     #from IsoNet.utils.fileio import read_defocus_file
+        #     #TODO decide the defocus file format from CTFFIND and GCTF
+        #     print("read from CTFFIND result not implimented")
 
-        add_param("None", "rlnSnrFalloff",0)
-        add_param("None", "rlnDeconvStrength",1)
+        # add_param("None", "rlnSnrFalloff",0)
+        # add_param("None", "rlnDeconvStrength",1)
         # add_param("None", "rlnDeconvTomoName","None")
 
         # mask parameters
-        add_param("None", "rlnMaskBoundary","None")
-        add_param("None", "rlnMaskDensityPercentage",50)
-        add_param("None", "rlnMaskStdPercentage",50)
+        # add_param("None", "rlnMaskBoundary","None")
+        # add_param("None", "rlnMaskDensityPercentage",50)
+        # add_param("None", "rlnMaskStdPercentage",50)
         add_param(mask_folder, "rlnMaskName","None")
 
         # tilt angle parameters
-        add_param("None", "rlnTiltMin",-60)
-        add_param("None", "rlnTiltMax",60)
-        add_param("None", "rlnTiltStep",3)
+        add_param("None", "rlnTiltMin",tilt_min)
+        add_param("None", "rlnTiltMax",tilt_max)
+        add_param("None", "rlnTiltStep",tilt_step)
 
         # subtomogram coordinates
         add_param(coordinate_folder, 'rlnBoxFile', "None")
@@ -153,6 +149,7 @@ class ISONET:
         df = pd.DataFrame(data = data, columns = label)
         df.insert(0, 'rlnIndex', np.arange(num_tomo)+1)
         starfile.write(df,star_name)
+        return df
 
     def deconv(self, star_file: str,
         deconv_folder:str="./deconv",
@@ -531,13 +528,13 @@ class ISONET:
             if not input_column in star.columns or star.iloc[0][input_column] in [None, "None"]:
                 print("using rlnTomoName instead of rlnDeconvTomoName")
                 input_column = "rlnTomoName"
-            num_noise_volume = 1000
-            if noise_level > 0:
-                print("generating noise folder")
-                from IsoNet.utils.noise import make_noise_folder
-                noise_dir = f"{output_dir}/noise_volumes"
-                # Note: the angle for this noise generation is range(-90,90,3)
-                make_noise_folder(noise_dir,noise_mode,cube_size,num_noise_volume,ncpus=ncpus)
+        num_noise_volume = 1000
+        if noise_level > 0:
+            print("generating noise folder")
+            from IsoNet.utils.noise import make_noise_folder
+            noise_dir = f"{output_dir}/noise_volumes"
+            # Note: the angle for this noise generation is range(-90,90,3)
+            make_noise_folder(noise_dir,noise_mode,cube_size,num_noise_volume,ncpus=ncpus)
 
         training_params = {
             "method":method,

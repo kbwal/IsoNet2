@@ -186,7 +186,7 @@ def ddp_train(rank, world_size, port_number, model, train_dataset, training_para
                     # print(std_org,subtomos.std(),rotated_subtomo.std(),  mw_rotated_subtomos.std())
 
                     
-                    if training_params['method'] == "isonet2" and training_params["noise_level"] > 0:
+                    if training_params["noise_level"] > 0:
                         noise_vol = apply_F_filter_torch(noise_vol, mw)
                         mw_rotated_subtomos += std_org * noise_vol * training_params["noise_level"] / torch.std(noise_vol) * random.random()
 
