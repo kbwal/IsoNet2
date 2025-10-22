@@ -52,8 +52,6 @@ def get_ctf1d(angpix, voltage, cs, defocus, amplitude, phaseshift, bfactor, leng
             if ctf[item-1] < ctf[item] and ctf[item+1]<=ctf[item]:
                 break
         # 
-        # print(ctf[item])
-        print(clip_first_peak_mode)
         if clip_first_peak_mode == 1:
             ctf[:item] = ctf[item]
         elif clip_first_peak_mode == 2:
@@ -66,7 +64,6 @@ def get_ctf1d(angpix, voltage, cs, defocus, amplitude, phaseshift, bfactor, leng
                 new_val = np.cos(item_reassign/item * np.pi/2)
                 new_val = new_val*ctf[item]
                 ctf[item_reassign] = max(ctf[item_reassign], new_val)
-    print(bfactor)
     bfactor_term = np.exp(-bfactor * k2 * 0.25)
     # print(k2)
     # print(bfactor_term)

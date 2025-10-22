@@ -471,6 +471,7 @@ def ddp_train(rank, world_size, port_number, model, train_dataset, training_para
             torch.save({
                     'method':training_params['method'],
                     'CTF_mode': training_params['CTF_mode'],
+                    'do_phaseflip_input': training_params['do_phaseflip_input'],
                     'arch':training_params['arch'],
                     'model_state_dict': model_params,
                     'metrics': training_params["metrics"],

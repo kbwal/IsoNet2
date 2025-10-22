@@ -38,13 +38,11 @@ class ISONET:
                      coordinate_folder: str='None',
                      star_name: str='tomograms.star',
                      pixel_size = 'auto', 
-                    #  defocus_folder: str="None",
                      cs: float=2.7,
                      voltage: float=300,
                      ac: float=0.1,
                      tilt_min: float=-60,
                      tilt_max: float=60,
-                     tilt_step: float=3,
                      create_average: bool=False,
                      number_subtomos = 1000):
         """
@@ -128,26 +126,14 @@ class ISONET:
         add_param("None", "rlnVoltage", voltage)
         add_param("None", "rlnSphericalAberration", cs)
         add_param("None", "rlnAmplitudeContrast", ac)
-        # else:
-        #     #TODO defocus file folder 
-        #     #from IsoNet.utils.fileio import read_defocus_file
-        #     #TODO decide the defocus file format from CTFFIND and GCTF
-        #     print("read from CTFFIND result not implimented")
-
-        # add_param("None", "rlnSnrFalloff",0)
-        # add_param("None", "rlnDeconvStrength",1)
-        # add_param("None", "rlnDeconvTomoName","None")
 
         # mask parameters
         add_param("None", "rlnMaskBoundary","None")
-        # add_param("None", "rlnMaskDensityPercentage",50)
-        # add_param("None", "rlnMaskStdPercentage",50)
         add_param(mask_folder, "rlnMaskName","None")
 
         # tilt angle parameters
         add_param("None", "rlnTiltMin",tilt_min)
         add_param("None", "rlnTiltMax",tilt_max)
-        add_param("None", "rlnTiltStep",tilt_step)
 
         # subtomogram coordinates
         add_param(coordinate_folder, 'rlnBoxFile', "None")
@@ -227,6 +213,7 @@ class ISONET:
             deconv_one(
                 tomo_file,
                 deconv_tomo_name,
+                output_dir,
                 **common_kwargs
             )
 
@@ -299,13 +286,11 @@ class ISONET:
 
     def predict(self, star_file: str, 
                 model: str, 
-                model2: str=None,
                 output_dir: str='./corrected_tomos', 
                 gpuID: str = None, 
                 input_column: str = "rlnDeconvTomoName",
                 apply_mw_x1: bool=True, 
                 phaseflipped: bool=False,
-                do_phaseflip_input: bool=True,
                 padding_factor: float=1.5,
                 tomo_idx=None):
         """
@@ -326,13 +311,15 @@ class ISONET:
         """
         ngpus, gpuID, gpuID_list = process_gpuID(gpuID)
 
-        if model2 not in (None, 'None'):
-            network = DuoNet(pretrained_model1=model, pretrained_model2=model2, state='predict')
-        else:
-            network = Net(pretrained_model=model, state='predict')
+        network = Net(pretrained_model=model, state='predict')
 
         cube_size = network.cube_size
         CTF_mode = network.CTF_mode
+        if hasattr(network, 'do_phaseflip_input'):
+            do_phaseflip_input = network.do_phaseflip_input
+        else:
+            print("network do not have do_phaseflip_input")
+            do_phaseflip_input = True
 
         def predict_row(i, row, new_star):
             # 1) Build missing‑wedge mask if requested
@@ -374,7 +361,6 @@ class ISONET:
 
             out_data = []
             for tomo_p in tomo_paths:
-                print(tomo_p)
                 tomo_vol, _ = read_mrc(tomo_p)
                 # now we are using precentile again similar to isonet1
                 if network.method =='isonet2':
@@ -420,13 +406,11 @@ class ISONET:
 
                    arch: str='unet-medium',
                    pretrained_model: str=None,
-                   pretrained_model2: str=None,
 
                    cube_size: int=96,
                    epochs: int=50,
 
                    batch_size: int=None, 
-                   acc_batches: int=1,
                    loss_func: str = "L2",
                    save_interval: int=10,
                    learning_rate: float=3e-4,
@@ -437,13 +421,12 @@ class ISONET:
                    phaseflipped: bool=False,
                    do_phaseflip_input: bool=True,
                    bfactor: float=0,
-                   
+                   clip_first_peak_mode: float=1,
                    snrfalloff: float=0,
                    deconvstrength: float=1,
                    highpassnyquist:float=0.02,
 
                    with_predict: bool=True,
-                   split_halves: bool=False
                    ):
         '''
         method: n2n isonet2 isonet2-n2n
@@ -454,6 +437,7 @@ class ISONET:
         mixed_precision: use mixed precision to reduce VRAM and increase speed
         loss_func: L2, Huber
         '''
+        acc_batches=1,
         create_folder(output_dir,remove=False)
         batch_size, ngpus, ncpus = parse_params(batch_size, gpuID, ncpus)
         steps_per_epoch = 200000000
@@ -489,35 +473,23 @@ class ISONET:
             "highpassnyquist":highpassnyquist,
             "do_phaseflip_input":do_phaseflip_input,
             "bfactor":bfactor,
+            "clip_first_peak_mode":clip_first_peak_mode,
             "move_norm": False
         }
-        if split_halves:
-            from IsoNet.models.network import DuoNet
-            network = DuoNet(method='n2n', arch=arch, cube_size=cube_size, pretrained_model1=pretrained_model, pretrained_model2 = pretrained_model2, state='train')
-            network.train(training_params) #train based on init model and save new one as model_iter{num_iter}.h5            
-        else:
-            training_params['split'] = "full"
-            from IsoNet.models.network import Net
-            network = Net(method='n2n', arch=arch, cube_size=cube_size, pretrained_model=pretrained_model,state='train')
-            network.train(training_params) #train based on init model and save new one as model_iter{num_iter}.h5
+
+        training_params['split'] = "full"
+        from IsoNet.models.network import Net
+        network = Net(method='n2n', arch=arch, cube_size=cube_size, pretrained_model=pretrained_model,state='train')
+        network.train(training_params) #train based on init model and save new one as model_iter{num_iter}.h5
         if with_predict:
-            if split_halves:
-                if epochs == 0:
-                    model_file1 = pretrained_model
-                    model_file2 = pretrained_model2
-                else:
-                    model_file1 = f"{output_dir}/network_n2n_{arch}_{cube_size}_top.pt"
-                    model_file2 = f"{output_dir}/network_n2n_{arch}_{cube_size}_bottom.pt"
-                self.predict(star_file=star_file, model=model_file1, model2=model_file2, output_dir=output_dir, gpuID=gpuID,\
-                                             isCTFflipped=phaseflipped) 
-            else:
-                if epochs == 0:
-                    model_file = pretrained_model
-                else:
-                    model_file = f"{output_dir}/network_n2n_{arch}_{cube_size}_full.pt"
+            new_epochs = save_interval
+            training_params["epochs"] = new_epochs
+            for step in range(save_interval, epochs+1, save_interval):
+                network.train(training_params) #train based on init model and save new one as model_iter{num_iter}.h5
+                model_file = f"{output_dir}/network_n2n_{arch}_{cube_size}_full.pt"
                 self.predict(star_file=star_file, model=model_file, output_dir=output_dir, gpuID=gpuID, \
-                             isCTFflipped=phaseflipped) 
-                #f"{training_params['output_dir']}/network_{training_params['arch']}_{training_params['method']}.pt"
+                            phaseflipped=phaseflipped, tomo_idx=0) 
+
 
     def refine(self, 
                    star_file: str,
@@ -529,7 +501,6 @@ class ISONET:
                    method: str="isonet2-n2n",
                    arch: str='unet-medium',
                    pretrained_model: str=None,
-                   pretrained_model2: str=None,
 
                    cube_size: int=96,
                    epochs: int=50,
@@ -551,22 +522,16 @@ class ISONET:
                    phaseflipped: bool=False,
                    do_phaseflip_input: bool=True,
 
-                   correct_between_tilts: bool=True,
-                   start_bt_size: int=128,
-
                    noise_level: float=0, 
-                   noise_mode: str="None",
+                   noise_mode: str="nofilter",
 
                    random_rot_weight: float=0.2,
 
                    with_predict: bool=True,
-                   split_halves: bool=False,
 
                    snrfalloff: float=0,
                    deconvstrength: float=1,
                    highpassnyquist:float=0.02,
-
-                   move_norm: bool=False,
 
                    ):
         '''
@@ -579,8 +544,11 @@ class ISONET:
         loss_func: L2, Huber
         '''
         compile_model=False,
+        move_norm=False,
         # there is some questions about this parameter, relate to the placement of the zerograd
         acc_batches=1
+        correct_between_tilts: bool=False,
+        start_bt_size: int=128,
 
         create_folder(output_dir,remove=False)
         batch_size, ngpus, ncpus = parse_params(batch_size, gpuID, ncpus, fit_ncpus_to_ngpus=True)
@@ -646,26 +614,19 @@ class ISONET:
             "move_norm":move_norm,
             "bfactor": bfactor
         }
-        if split_halves:
-            from IsoNet.models.network import DuoNet
-            network = DuoNet(method=method, arch=arch, cube_size=cube_size, pretrained_model1=pretrained_model, pretrained_model2 = pretrained_model2, state='train')
-            network.train(training_params) #train based on init model and save new one as model_iter{num_iter}.h5            
-        else:
-            training_params['split'] = "full"
-            from IsoNet.models.network import Net
-            network = Net(method=method, arch=arch, cube_size=cube_size, pretrained_model=pretrained_model,state='train')
-            network.train(training_params) #train based on init model and save new one as model_iter{num_iter}.h5
+
+        training_params['split'] = "full"
+        from IsoNet.models.network import Net
+        network = Net(method=method, arch=arch, cube_size=cube_size, pretrained_model=pretrained_model,state='train')
+        network.train(training_params) #train based on init model and save new one as model_iter{num_iter}.h5
         if with_predict:
-            if split_halves:
-                model_file1 = f"{output_dir}/network_{method}_{arch}_{cube_size}_top.pt"
-                model_file2 = f"{output_dir}/network_{method}_{arch}_{cube_size}_bottom.pt"
-                self.predict(star_file=star_file, model=model_file1, model2=model_file2, output_dir=output_dir, gpuID=gpuID,\
-                                            phaseflipped=phaseflipped, do_phaseflip_input=do_phaseflip_input) 
-            else:
+            new_epochs = save_interval
+            training_params["epochs"] = new_epochs
+            for step in range(save_interval, epochs+1, save_interval):
+                network.train(training_params) #train based on init model and save new one as model_iter{num_iter}.h5
                 model_file = f"{output_dir}/network_{method}_{arch}_{cube_size}_full.pt"
                 self.predict(star_file=star_file, model=model_file, output_dir=output_dir, gpuID=gpuID, \
-                            phaseflipped=phaseflipped, do_phaseflip_input=do_phaseflip_input) 
-                #f"{training_params['output_dir']}/network_{training_params['arch']}_{training_params['method']}.pt"
+                            phaseflipped=phaseflipped, tomo_idx=0) 
 
     def refine_v1(self,
         star_file: str,
