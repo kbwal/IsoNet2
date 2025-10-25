@@ -290,9 +290,10 @@ class ISONET:
                 gpuID: str = None, 
                 input_column: str = "rlnDeconvTomoName",
                 apply_mw_x1: bool=True, 
-                phaseflipped: bool=False,
+                isCTFflipped: bool=False,
                 padding_factor: float=1.5,
-                tomo_idx=None):
+                tomo_idx=None,
+                output_prefex="corrected"):
         """
         \nPredict tomograms using trained model\n
         isonet.py predict star_file model [--gpuID] [--output_dir] [--cube_size] [--crop_size] [--batch_size] [--tomo_idx]
@@ -321,6 +322,7 @@ class ISONET:
             print("network do not have do_phaseflip_input")
             do_phaseflip_input = True
 
+        all_tomo_paths = []
         def predict_row(i, row, new_star):
             # 1) Build missing‑wedge mask if requested
             F_mask = (
@@ -332,7 +334,7 @@ class ISONET:
 
             # 2) Optionally incorporate CTF into the mask
             if CTF_mode in ["wiener","phase_only","network"] and do_phaseflip_input:
-                if phaseflipped == False:
+                if isCTFflipped == False:
                     defocus = row.rlnDefocus / 10000.0
                     ctf3d = np.sign(
                         get_ctf_3d(
@@ -357,7 +359,7 @@ class ISONET:
                     row.rlnTomoReconstructedTomogramHalf2
                 ]
             base = os.path.splitext(os.path.basename(tomo_paths[0]))[0]
-            prefix = f"{output_dir}/corrected_{network.method}_{network.arch}_{base}"
+            prefix = f"{output_dir}/{output_prefex}_{network.method}_{network.arch}_{base}"
 
             out_data = []
             for tomo_p in tomo_paths:
@@ -382,6 +384,8 @@ class ISONET:
 
             out_file = f"{prefix}.mrc"
             write_mrc(out_file, out_data.astype(np.float32) * -1)
+            all_tomo_paths.append(out_file)
+
 
             # 5) Update STAR
             column = "rlnDenoisedTomoName" if network.method == 'n2n' else "rlnCorrectedTomoName"
@@ -396,6 +400,7 @@ class ISONET:
             desc="Predict",
             row_processor=predict_row
         )
+        return all_tomo_paths
 
     def denoise(self, 
                    star_file: str,
@@ -418,7 +423,7 @@ class ISONET:
                    mixed_precision: bool=True,
 
                    CTF_mode: str="None",
-                   phaseflipped: bool=False,
+                   isCTFflipped: bool=False,
                    do_phaseflip_input: bool=True,
                    bfactor: float=0,
                    clip_first_peak_mode: float=1,
@@ -427,6 +432,7 @@ class ISONET:
                    highpassnyquist:float=0.02,
 
                    with_predict: bool=True,
+                   pred_tomo_idx:str=1
                    ):
         '''
         method: n2n isonet2 isonet2-n2n
@@ -437,7 +443,7 @@ class ISONET:
         mixed_precision: use mixed precision to reduce VRAM and increase speed
         loss_func: L2, Huber
         '''
-        acc_batches=1,
+        acc_batches=1
         create_folder(output_dir,remove=False)
         batch_size, ngpus, ncpus = parse_params(batch_size, gpuID, ncpus)
         steps_per_epoch = 200000000
@@ -463,7 +469,7 @@ class ISONET:
             'learning_rate_min':learning_rate_min,
             'loss_func':loss_func,
             'CTF_mode':CTF_mode,
-            "phaseflipped": phaseflipped,
+            "phaseflipped": isCTFflipped,
             "starting_epoch": 0,
             "noise_level": 0,
             "correct_between_tilts":False,
@@ -479,16 +485,22 @@ class ISONET:
 
         training_params['split'] = "full"
         from IsoNet.models.network import Net
+        from IsoNet.utils.plot_metrics import save_slices_and_spectrum
         network = Net(method='n2n', arch=arch, cube_size=cube_size, pretrained_model=pretrained_model,state='train')
-        network.train(training_params) #train based on init model and save new one as model_iter{num_iter}.h5
+        network.prepare_train_dataset(training_params)
         if with_predict:
             new_epochs = save_interval
             training_params["epochs"] = new_epochs
             for step in range(save_interval, epochs+1, save_interval):
                 network.train(training_params) #train based on init model and save new one as model_iter{num_iter}.h5
                 model_file = f"{output_dir}/network_n2n_{arch}_{cube_size}_full.pt"
-                self.predict(star_file=star_file, model=model_file, output_dir=output_dir, gpuID=gpuID, \
-                            phaseflipped=phaseflipped, tomo_idx=0) 
+                print("to predict")
+                all_tomo_paths = self.predict(star_file=star_file, model=model_file, output_dir=output_dir, gpuID=gpuID, \
+                            isCTFflipped=isCTFflipped, tomo_idx=pred_tomo_idx,output_prefex=f"corrected_epochs{step}") 
+                save_slices_and_spectrum(all_tomo_paths[0],output_dir,step)
+        else:
+            network.train(training_params) #train based on init model and save new one as model_iter{num_iter}.h5
+
 
 
     def refine(self, 
@@ -519,7 +531,7 @@ class ISONET:
                    clip_first_peak_mode: int=1,
                    bfactor: float=0,
 
-                   phaseflipped: bool=False,
+                   isCTFflipped: bool=False,
                    do_phaseflip_input: bool=True,
 
                    noise_level: float=0, 
@@ -528,6 +540,7 @@ class ISONET:
                    random_rot_weight: float=0.2,
 
                    with_predict: bool=True,
+                   pred_tomo_idx:str=1,
 
                    snrfalloff: float=0,
                    deconvstrength: float=1,
@@ -600,7 +613,7 @@ class ISONET:
             'learning_rate_min':learning_rate_min,
             'loss_func':loss_func,
             'CTF_mode':CTF_mode,
-            "phaseflipped": phaseflipped,
+            "phaseflipped": isCTFflipped,
             "starting_epoch": 0,
             "noise_level": noise_level,
             "correct_between_tilts":correct_between_tilts,
@@ -617,16 +630,21 @@ class ISONET:
 
         training_params['split'] = "full"
         from IsoNet.models.network import Net
+        from IsoNet.utils.plot_metrics import save_slices_and_spectrum
         network = Net(method=method, arch=arch, cube_size=cube_size, pretrained_model=pretrained_model,state='train')
-        network.train(training_params) #train based on init model and save new one as model_iter{num_iter}.h5
+        network.prepare_train_dataset(training_params)
         if with_predict:
             new_epochs = save_interval
             training_params["epochs"] = new_epochs
             for step in range(save_interval, epochs+1, save_interval):
                 network.train(training_params) #train based on init model and save new one as model_iter{num_iter}.h5
                 model_file = f"{output_dir}/network_{method}_{arch}_{cube_size}_full.pt"
-                self.predict(star_file=star_file, model=model_file, output_dir=output_dir, gpuID=gpuID, \
-                            phaseflipped=phaseflipped, tomo_idx=0) 
+                print("to predict")
+                all_tomo_paths = self.predict(star_file=star_file, model=model_file, output_dir=output_dir, gpuID=gpuID, \
+                            isCTFflipped=isCTFflipped, tomo_idx=pred_tomo_idx,output_prefex=f"corrected_epochs{step}") 
+                save_slices_and_spectrum(all_tomo_paths[0],output_dir,step)
+        else:
+            network.train(training_params) #train based on init model and save new one as model_iter{num_iter}.h5
 
     def refine_v1(self,
         star_file: str,

@@ -84,7 +84,6 @@ def process_batch(batch):
 def ddp_train(rank, world_size, port_number, model, train_dataset, training_params):
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = port_number
-    
     batch_size_gpu = training_params['batch_size'] // (training_params['acc_batches'] * world_size)
        
     n_workers = max(training_params["ncpus"] // world_size, 1)
