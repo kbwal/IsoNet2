@@ -141,7 +141,7 @@ def ddp_train(rank, world_size, port_number, model, train_dataset, training_para
                 x1, x2, gt, mw, ctf, wiener, noise_vol = process_batch(batch)
 
                 if training_params['CTF_mode'] in  ["phase_only", 'wiener','network']:
-                    if not training_params["phaseflipped"]:
+                    if training_params["phaseflipped"]:
                         ctf = torch.abs(ctf)
                         wiener = torch.abs(wiener) 
                     else:
