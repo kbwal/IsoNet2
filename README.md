@@ -103,7 +103,7 @@ TS_45_ODD.mrc
 TS_54_ODD.mrc
 ```
 
-![Fig. A](figures/Fig1.png, "Tomograms 1-5")
+![](./IsoNet/tutorial/figures/Fig1.png)
 
 ## 2.1 GUI
 
@@ -117,61 +117,61 @@ Launch the GUI using `IsoNet2 -no-sandbox &`
 
 Open the **Prepare** tab and select **Even/Odd Input**:
 
-![Fig. B]()
+![](./IsoNet/tutorial/figures/GUI/01OpenPrepare.png)
 
 Identify your **even** and **odd** data directories. 
 
-![Fig. B](figures/1.png)
+![](./IsoNet/tutorial/figures/GUI/02SelectEvenOdd.png)
 
 Disable **create average** for Noise2Noise training. Enable this to create a full tomogram from two half tomograms for non-Noise2Noise training. Adjust the **pixel size in Å** and **number subtomograms per tomo** as needed. For the purpose of this quick tutorial, we will decrease the number of subtomograms. The other parameters are related to your physical electron microscope and are used later for network-based deconvolution. They are left at default for this tutorial, as are the **tilt min** and **tilt max**. **Show command** provides the `isonet.py` command if you prefer to run it directly in your terminal.
 
-![Fig. B](figures/1.png)
+![](./IsoNet/tutorial/figures/GUI/03ModifyParameters.png)
 
 **Run** your job. The starfile should automatically display. If you ran the command in your terminal, **load the starfile** from your working directory. Adjust the **rlnDefocus** column with the approximate defocus in Å at 0° for each tomogram.
 
-![Fig. B](figures/1.png)
+![](./IsoNet/tutorial/figures/GUI/04ModifyDefocus.png)
 
 ### 2.1.2 Create Mask
 
 Open the **Create Mask** tab and select your **Input Column**. For even/odd split datasets, choose **rlnTomoReconstructedTomogramHalf1**
 
-![Fig. B](figures/1.png)
+![](./IsoNet/tutorial/figures/GUI/05OpenMask.png)
 
 **Submit** your job. Clicking on your job in the new column will display your progress. This output is saved to **./make_mask/jobID/log.txt**.
 
-![Fig. B](figures/1.png)
+![](./IsoNet/tutorial/figures/GUI/06RunMask.png)
 
 ### 2.1.3 Refine
 
 Open the **Refine** tab. Keep **Even/Odd Input** enabled and adjust **mw weight** and **gpuID** as needed. **mw weight** determines how heavily the network prioritizes missing wedge correction over denoising. Here the ratio is 200:1.
 
-![Fig. B](figures/1.png)
+![](./IsoNet/tutorial/figures/GUI/07OpenRefine.png)
 
  **Submit (In Queue)** this job. Clicking on your job in the new column will display your progress This output is saved to **./refine/jobID/log.txt**.
 
-![Fig. B](figures/1.png)
+![](./IsoNet/tutorial/figures/GUI/08RunRefine.png)
 
 To practice queuing jobs, open the **Refine** tab again, using the same parameters as before. Scroll down and select an arbitrary **CTF_moder** to differentiate it from the first job. Click **Submit (In Queue)** to queue your job. You will see a second marker appear in the refine column. Clicking **Submit (Run Immediately)** will bypass the queue, causing both jobs to run simultaneously. This will increase training time for both jobs.
 
-![Fig. B](figures/1.png)
+![](./IsoNet/tutorial/figures/GUI/09QueueRefine.png)
 
 Open the **Jobs Viewer** tab. Here we can see the our jobs' statuses and IDs. You can kill the second job.
 
-![Fig. B](figures/1.png)
+![](./IsoNet/tutorial/figures/GUI/10JobsViewer.png)
 
 ### 2.1.4 Predict
 
 After training is complete, open the **Predict** tab. Adjust **gpuID** as needed.
 
-![Fig. B](figures/1.png)
+![](./IsoNet/tutorial/figures/GUI/11OpenPredict.png)
 
 Select the completed (*"... full.pt"*) model from your refine directory. **Submit** your job. Clicking on your job in the new column will display your progress. This output is saved to **./predict/jobID/log.txt**.
 
-![Fig. B](figures/1.png)
+![](./IsoNet/tutorial/figures/GUI/12SelectModel.png)
 
-View your corrected tomograms in **./predict/jobID_predict**
+Wait for prediction to finish. View your corrected tomograms in **./predict/jobID_predict**
 
-![Fig. A](figures/Fig2.png, "Corrected Tomograms 1-5")
+![](./IsoNet/tutorial/figures/Fig2.png)
 
 ## 2.2 Command Line
 
