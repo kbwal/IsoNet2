@@ -1,43 +1,26 @@
-# IsoNet2 Tutorial
+<!-- # IsoNet2 Tutorial
 
 **IsoNet2** is a deep-learning software package for simultaneous missing wedge correction, denoising, and CTF correction in cryo-electron tomography reconstructions using a deep neural network trained on information from the original tomogram(s). Compared to IsoNet1, IsoNet2 produces tomograms with higher resolution and less noise in roughly a tenth of the time. The software requires tomograms as input. Paired tomograms for Noise2Noise training can be split by either frame or tilt.
 
 **IsoNet2** contains six modules: **prepare star**, **CTF deconvolve**, **generate mask**, **denoise**, **refine**, and **predict**. All commands in IsoNet operate on **.star** text files which record paths of data and relevant parameters. For detailed descriptions of each module please refer to the individual tasks. Users can choose to utilize IsoNet through either GUI or command-lines.
 
 # 1. Installation and System Requirements
+The following tutorial is written for assuming absolutely no experience with Anaconda or Linux environments.
 
-IsoNet runs on Linux and requires CUDA-capable GPUs.
-Recommended: Nvidia GTX 1080Ti or newer, with at least 8 GB VRAM
+Software Requirements: This Linux installation of IsoNet requires [`CUDA Version >= 12.0`](https://docs.nvidia.com/cuda/archive/11.8.0/cuda-installation-guide-linux/index.html) and [Anaconda](https://www.anaconda.com/download). A more comprehensive guide for installing CUDA can be found in the [TomoPy UI docs](https://tomopyui.readthedocs.io/en/latest/install.html).
 
-Ensure that you have enabled [`CUDA Version >= 12.0`](https://docs.nvidia.com/cuda/archive/11.8.0/cuda-installation-guide-linux/index.html)-capable GPUs. A more comprehensive guide for installing CUDA can be found in the [TomoPy UI docs](https://tomopyui.readthedocs.io/en/latest/install.html). You can check your version using `nvidia-smi`, which should produce something similar to below:
+
+Hardware Requirements: ***Nvidia GTX 1080Ti or newer, with at least 8 GB VRAM ?***
+
+You can check your `CUDA` version using `nvidia-smi`, which should produce something similar to below:
 ```
 +---------------------------------------------------------------------------------------+
 | NVIDIA-SMI 535.261.03             Driver Version: 535.261.03   CUDA Version: 12.2     |
 |-----------------------------------------+----------------------+----------------------+
 | GPU  Name                 Persistence-M | Bus-Id        Disp.A | Volatile Uncorr. ECC |
-| Fan  Temp   Perf          Pwr:Usage/Cap |         Memory-Usage | GPU-Util  Compute M. |
-|                                         |                      |               MIG M. |
-|=========================================+======================+======================|
-|   0  NVIDIA RTX 6000 Ada Gene...    Off | 00000000:01:00.0 Off |                  Off |
-| 30%   36C    P8              23W / 300W |      0MiB / 49140MiB |      0%      Default |
-|                                         |                      |                  N/A |
-+-----------------------------------------+----------------------+----------------------+
-|   1  NVIDIA RTX 6000 Ada Gene...    Off | 00000000:41:00.0 Off |                  Off |
-| 30%   37C    P8              26W / 300W |      0MiB / 49140MiB |      0%      Default |
-|                                         |                      |                  N/A |
-+-----------------------------------------+----------------------+----------------------+
-|   2  NVIDIA RTX 6000 Ada Gene...    Off | 00000000:81:00.0 Off |                  Off |
-| 30%   36C    P8              22W / 300W |      0MiB / 49140MiB |      0%      Default |
-|                                         |                      |                  N/A |
-+-----------------------------------------+----------------------+----------------------+
-|   3  NVIDIA RTX 6000 Ada Gene...    Off | 00000000:C1:00.0 Off |                  Off |
-| 30%   36C    P8              26W / 300W |      0MiB / 49140MiB |      0%      Default |
-|                                         |                      |                  N/A |
-+-----------------------------------------+----------------------+----------------------+
 
-+---------------------------------------------------------------------------------------+
-| Processes:                                                                            |
-|  GPU   GI   CI        PID   Type   Process name                            GPU Memory |
+...
+
 |        ID   ID                                                             Usage      |
 |=======================================================================================|
 |  No running processes found                                                           |
@@ -49,53 +32,32 @@ Clone this repository:
 git clone https://github.com/procyontao/IsoNet2.git
 cd IsoNet2
 ```
-Run `./install.sh`. This create an [Anaconda](https://www.anaconda.com/download) environment using the included `isonet2_environment.yml` file and updates your environment variables by running `source isonet2.bashrc`. You may append this command to your .bashrc file.
+
+Run `./install.sh`. This creates an Conda environment (installing requirements) using the included **isonet2_environment.yml** file and updates your environment variables (allowing you to call isonet.py) by running `source isonet2.bashrc`. You may append this command to your .bashrc file.
 
 
- Upon successful installation, running the command `isonet.py --help` should display the following help message.
+Installation should take 5-10 minutes. Upon successful installation, running the command `isonet.py --help` should display the following help message.
 ```
 INFO: Showing help with the command 'isonet.py -- --help'.
 
 NAME
     isonet.py - ISONET: Train on tomograms and restore missing-wedge.
 
-SYNOPSIS
-    isonet.py -
-
-DESCRIPTION
-    Usage:
-        isonet.py [command] -h
-
-    Commands:
-        prepare_star      Generate a tomograms.star file from tomogram folders
-        star2json         Convert star file to JSON format
-        json2star         Convert JSON file to star format
-        deconv            CTF deconvolution for tomograms
-        make_mask         Generate masks for tomograms
-        predict           Predict tomograms using trained model
-        denoise           Train denoising model (noise2noise)
-        refine            Train missing wedge correction model
-        simulate_noise_F  Simulate Fourier domain noise statistics
-        postprocessing    Combine half-maps for postprocessing and FSC
-        resize            Rescale tomograms to a given pixel size
-        powerlaw_filtering Apply power-law filtering to a map
-        psf               Generate point spread function or missing wedge mask
-        check             Check IsoNet installation and GPU performance
-        gui               Launch the IsoNet graphical user interface
+...
 ```
 # 2. Tutorial
 
-The following two examples outline the basic IsoNet2 workflow in Linux. More in-depth explanations of each parameter can be found under ***4. IsoNet Modules.*** A video tutorial can be found in the following [Google Drive.](https://drive.google.com/drive/u/1/folders/1P9sxSSJIWPs7hIGey3I38u3B2OvmiCAC)
+The following outlines the example IsoNet2 command-line and GUI workflow in Linux for two datasets. More in-depth explanations of each parameter can be found under ***4. IsoNet Modules.*** A video tutorial can be found in the following [Google Drive.](https://drive.google.com/drive/u/1/folders/1P9sxSSJIWPs7hIGey3I38u3B2OvmiCAC)
 
 ## 2.1 Ribosome dataset (split tomogram)
 
-This [dataset](https://drive.google.com/drive/u/1/folders/1O1Uc4LrTls-8MZxXOjkryBtjqfGoHlEe) contains 5 tomograms from EMPIAR-10985 with frame-based EVN/ODD split.
+This [dataset](https://drive.google.com/drive/u/0/folders/1mmvTDvi-rjDcCF1aSBZLCxQ5ulWI1sRl) contains 5 tomograms from EMPIAR-10985 with frame-based EVN/ODD split.
 
 ### 2.1.1 Prepare Tomograms and Starfile
 
-In a new working directory, download the EVN and ODD folders.  
+In a new working directory, download the **tomograms_split** folder. This contains even and odd half tomograms.  
 
-Output for `ls -1 EVN`:
+Output for `ls -1 tomograms_split/EVN`:
 ```
 9x9_ts_01_sort_EVN_Vol-rotx.mrc
 9x9_ts_02_sort_EVN_Vol-rotx.mrc
@@ -103,7 +65,7 @@ Output for `ls -1 EVN`:
 9x9_ts_04_sort_EVN_Vol-rotx.mrc
 9x9_ts_05_sort_EVN_Vol-rotx.mrc
 ```
-Output for `ls -1 ODD`:
+Output for `ls -1 tomograms_split/ODD`:
 ```
 9x9_ts_01_sort_ODD_Vol-rotx.mrc
 9x9_ts_02_sort_ODD_Vol-rotx.mrc
@@ -112,11 +74,11 @@ Output for `ls -1 ODD`:
 9x9_ts_05_sort_ODD_Vol-rotx.mrc
 ```
 
-![fig1](figures/figxx.png, "Tomograms 1-5")
-
+![Fig. 1](figures/Fig1.png, "Tomograms 1-5")
+  
 Prepare the starfile.   
-**number_subtomos** defines how many subtomograms are extracted per tomogram per epoch. By default, it is calculated using *2000/num_tomo* to extract 100,000 total subtomograms over 50 epochs.   
-**defocus** is the approximate defocus in _Å_ calculated for the 0-degree tilt images. This is not necessary for already-CTF-corrected or phase plate data. You may enter a single value to be used for every tomogram or a list of values to be applied to their respective tomograms. You may also use a text editor, such as vi or gedit, to open **tomograms.star** and manually enter the defocus value for each tomogram in the **rlnDefocus** column.
+**number_subtomos** defines how many subtomograms are extracted per tomogram per epoch. By default, it is calculated using *1000/num_tomo* to extract 50,000 total subtomograms over 50 epochs.   
+**defocus** is the approximate defocus in _Å_ calculated for the 0-degree tilt images. This is not necessary for already-CTF-corrected or phase plate data. You may enter a single value to be used for every tomogram or a list of values to be applied to their respective tomograms. You may also use your default text editor (or our ***GUI***) to open **tomograms.star** and manually enter the defocus value for each tomogram in the **rlnDefocus** column.
 ```
 isonet.py prepare_star --even tomograms_split/EVN --odd tomograms_split/ODD --star_name tomograms.star --pixel_size 5.35 --defocus "[25928.79, 25048.72, 25785.23, 26376.26, 26910.0]"
 ```
@@ -124,7 +86,7 @@ isonet.py prepare_star --even tomograms_split/EVN --odd tomograms_split/ODD --st
 Output for `cat tomograms.star`:
 
 ```
-# Created by the starfile Python package
+# Created by the starfile Python package (version 0.5.6) at 13:43:23 on 17/11/2025
 
 
 data_
@@ -145,15 +107,15 @@ _rlnTiltMin #12
 _rlnTiltMax #13
 _rlnBoxFile #14
 _rlnNumberSubtomo #15
-1       None    tomograms_split/EVN/9x9_ts_01_sort_EVN_Vol-rotx.mrc     tomograms_split/ODD/9x9_ts_01_sort_ODD_Vol-rotx.mrc     5.350000        25928.790000    300     2.700000        0.100000        None None     -60     60      None    400.000000
-2       None    tomograms_split/EVN/9x9_ts_02_sort_EVN_Vol-rotx.mrc     tomograms_split/ODD/9x9_ts_02_sort_ODD_Vol-rotx.mrc     5.350000        25048.720000    300     2.700000        0.100000        None None     -60     60      None    400.000000
-3       None    tomograms_split/EVN/9x9_ts_03_sort_EVN_Vol-rotx.mrc     tomograms_split/ODD/9x9_ts_03_sort_ODD_Vol-rotx.mrc     5.350000        25785.230000    300     2.700000        0.100000        None None     -60     60      None    400.000000
-4       None    tomograms_split/EVN/9x9_ts_04_sort_EVN_Vol-rotx.mrc     tomograms_split/ODD/9x9_ts_04_sort_ODD_Vol-rotx.mrc     5.350000        26376.260000    300     2.700000        0.100000        None None     -60     60      None    400.000000
-5       None    tomograms_split/EVN/9x9_ts_05_sort_EVN_Vol-rotx.mrc     tomograms_split/ODD/9x9_ts_05_sort_ODD_Vol-rotx.mrc     5.350000        26910.000000    300     2.700000        0.100000        None None     -60     60      None    400.000000
+1       None    tomograms_split/EVN/9x9_ts_01_sort_EVN_Vol-rotx.mrc     tomograms_split/ODD/9x9_ts_01_sort_ODD_Vol-rotx.mrc     5.400000        25928.790000    300   2.700000 0.100000        None    None    -60     60      None    1000
+2       None    tomograms_split/EVN/9x9_ts_02_sort_EVN_Vol-rotx.mrc     tomograms_split/ODD/9x9_ts_02_sort_ODD_Vol-rotx.mrc     5.400000        25048.720000    300   2.700000 0.100000        None    None    -60     60      None    1000
+3       None    tomograms_split/EVN/9x9_ts_03_sort_EVN_Vol-rotx.mrc     tomograms_split/ODD/9x9_ts_03_sort_ODD_Vol-rotx.mrc     5.400000        25785.230000    300   2.700000 0.100000        None    None    -60     60      None    1000
+4       None    tomograms_split/EVN/9x9_ts_04_sort_EVN_Vol-rotx.mrc     tomograms_split/ODD/9x9_ts_04_sort_ODD_Vol-rotx.mrc     5.400000        26376.260000    300   2.700000 0.100000        None    None    -60     60      None    1000
+5       None    tomograms_split/EVN/9x9_ts_05_sort_EVN_Vol-rotx.mrc     tomograms_split/ODD/9x9_ts_05_sort_ODD_Vol-rotx.mrc     5.400000        26910.000000    300   2.700000 0.100000        None    None    -60     60      None    1000
 ```
 ### 2.1.2 Refine
 
-Train IsoNet to reconstruct missing wedge and denoise subtomograms:
+Train IsoNet to reconstruct missing wedge and denoise subtomograms.
 
 ```
 isonet.py refine tomograms.star --output_dir isonet_maps --gpuID <ids> --epochs 50
@@ -444,4 +406,4 @@ rlnCorrectedTomoName or rlnDenoisedTomoName depending on method.
 
 ### Practical notes
 > Match prediction cube/crop sizes and padding to the network’s training settings (these come from the model object).
-When using CTF-aware models, ensure phaseflipped and STAR defocus/CTF fields are correct.
+When using CTF-aware models, ensure phaseflipped and STAR defocus/CTF fields are correct. -->
