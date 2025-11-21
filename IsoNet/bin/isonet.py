@@ -346,7 +346,7 @@ class ISONET:
                 isCTFflipped: bool=False,
                 padding_factor: float=1.5,
                 tomo_idx=None,
-                output_prefix="corrected"):
+                output_prefix=""):
         """
         Predict tomograms using trained model.
 
@@ -411,7 +411,7 @@ class ISONET:
                     row.rlnTomoReconstructedTomogramHalf2
                 ]
             base = os.path.splitext(os.path.basename(tomo_paths[0]))[0]
-            prefix = f"{output_dir}/{output_prefix}_{network.method}_{network.arch}_{base}"
+            prefix = f"{output_dir}/corrected{output_prefix}_{network.method}_{network.arch}_{base}"
             out_file = f"{prefix}.mrc"
             pbar_postfix = f"{[os.path.relpath(p) for p in tomo_paths]} → {out_file}"
             pbar.set_postfix_str(pbar_postfix)
@@ -445,7 +445,7 @@ class ISONET:
             # 5) Update STAR
             column = "rlnDenoisedTomoName" if network.method == 'n2n' else "rlnCorrectedTomoName"
             new_star.at[i, column] = out_file   
-            save_slices_and_spectrum(out_file,output_dir,'')
+            save_slices_and_spectrum(out_file,output_dir,output_prefix)
             
 
         process_tomograms(
@@ -573,8 +573,8 @@ class ISONET:
                 model_file = f"{output_dir}/network_n2n_{arch}_{cube_size}_full.pt"
                 shutil.copy(model_file, f"{output_dir}/network_n2n_{arch}_{cube_size}_epoch{step}_full.pt")
                 all_tomo_paths = self.predict(star_file=star_file, model=model_file, output_dir=output_dir, gpuID=gpuID, \
-                            isCTFflipped=isCTFflipped, tomo_idx=pred_tomo_idx,output_prefix=f"corrected_epochs{step}") 
-                save_slices_and_spectrum(all_tomo_paths[0],output_dir,step)
+                            isCTFflipped=isCTFflipped, tomo_idx=pred_tomo_idx,output_prefix=f"{step}") 
+                # save_slices_and_spectrum(all_tomo_paths[0],output_dir,step)
         else:
             network.train(training_params) #train based on init model and save new one as model_iter{num_iter}.h5
 
@@ -789,8 +789,8 @@ class ISONET:
                     num_mask_updates -= 1
                 else:
                     all_tomo_paths = self.predict(star_file=star_file, model=model_file, output_dir=output_dir, gpuID=gpuID, \
-                                isCTFflipped=isCTFflipped, tomo_idx=pred_tomo_idx,output_prefix=f"corrected_epochs{step}")
-                save_slices_and_spectrum(all_tomo_paths[0],output_dir,step)
+                                isCTFflipped=isCTFflipped, tomo_idx=pred_tomo_idx,output_prefix=f"{step}")
+                # save_slices_and_spectrum(all_tomo_paths[0],output_dir,step)
         else:
             network.train(training_params) #train based on init model and save new one as model_iter{num_iter}.h5
 
