@@ -10,11 +10,9 @@ def process_tomograms(star_path, output_dir, idx_str, desc, row_processor):
     os.makedirs(output_dir, exist_ok=True)
 
     with tqdm.tqdm(total=len(idx_list), desc=desc, unit='tomogram') as pbar:
-        # pbar.update(0)
         for i, row in star.iterrows():
             if str(row.rlnIndex) in idx_list:
-                row_processor(i, row, new_star, pbar)
-                # pbar.set_postfix_str(output_str)
+                row_processor(i, row, new_star)
                 pbar.update(1)
 
     starfile.write(new_star, star_path)

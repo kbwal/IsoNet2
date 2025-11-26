@@ -129,7 +129,7 @@ def ddp_train(rank, world_size, port_number, model, train_dataset, training_para
             train_sampler.set_epoch(epoch)
         model.train()
         optimizer.zero_grad() 
-        with tqdm(total=total_steps, unit="batch", disable=(rank!=0),desc=f"Epoch {epoch+1}") as progress_bar:
+        with tqdm(total=total_steps, unit=" batch", disable=(rank!=0),desc=f"Epoch {epoch+1}") as progress_bar:
             # have to convert to tensor because reduce needed it
             average_loss = torch.tensor(0, dtype=torch.float).to(rank)
             average_inside_loss = torch.tensor(0, dtype=torch.float).to(rank)

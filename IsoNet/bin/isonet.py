@@ -28,27 +28,18 @@ from IsoNet.utils.plot_metrics import save_slices_and_spectrum
 
 class ISONET:
     """
-    ISONET: Train on tomograms and restore missing-wedge.
+    ISONET: Train on tomograms to simultaneously perform missing wedge correction, CTF correction, and denoising.
 
-    Usage:
+    Usage: 
         isonet.py [command] -h
 
-    Commands:
+    Commands:   
         prepare_star      Generate a tomograms.star file from tomogram folders
-        star2json         Convert star file to JSON format
-        json2star         Convert JSON file to star format
+        denoise           Train denoising model (noise2noise)
         deconv            CTF deconvolution for tomograms
         make_mask         Generate masks for tomograms
-        predict           Predict tomograms using trained model
-        denoise           Train denoising model (noise2noise)
         refine            Train missing wedge correction model
-        simulate_noise_F  Simulate Fourier domain noise statistics
-        postprocessing    Combine half-maps for postprocessing and FSC
-        resize            Rescale tomograms to a given pixel size
-        powerlaw_filtering Apply power-law filtering to a map
-        psf               Generate point spread function or missing wedge mask
-        check             Check IsoNet installation and GPU performance
-        gui               Launch the IsoNet graphical user interface
+        predict           Predict tomograms using trained model
     """
 
     def prepare_star(self, full: str="None",
@@ -65,7 +56,7 @@ class ISONET:
                      tilt_min: float=-60,
                      tilt_max: float=60,
                      create_average: bool=False,
-                     number_subtomos: int = 1000):
+                     number_subtomos: int = 'auto'):
         """
         Generate a tomograms.star file from folder(s) containing tomogram files.
 
@@ -93,14 +84,10 @@ class ISONET:
         """
         import starfile
         import pandas as pd
-        if full in ["None", None, "none"]:
-            count_folder = even
-        else:
-            count_folder = full
+        count_folder = full if full not in ["None", None] else even
         num_tomo = len(os.listdir(count_folder))
         logging.info(f"Number of tomograms: {num_tomo}")
-        # number_subtomos = int(number_subtomos / num_tomo)
-
+        
         data = []
         label = []
 
@@ -121,20 +108,20 @@ class ISONET:
                     data.append([default_val]*num_tomo)
             label.append(param_name)
 
-        def create_average_func(even, odd, full = "sum_even_odd_tomograms"):
-
+        def create_average_func(even, odd, average = "averaged_tomos"):
             even_files_names = sorted(os.listdir(even))
             even_files = [f"{even}/{item}" for item in even_files_names]
-            odd_files = sorted(os.listdir(odd))
-            odd_files = [f"{odd}/{item}" for item in odd_files]
-            create_folder(full)
-            for i in tqdm.tqdm(range(len(even_files)), desc="averaging even odd"):
+            odd_files_names = sorted(os.listdir(odd))
+            odd_files = [f"{odd}/{item}" for item in odd_files_names]
+            create_folder(average)
+            for i in tqdm.tqdm(range(len(even_files)), desc="Averaging even and odd tomograms", unit=" tomograms"):
                 tomo_even, voxel_size = read_mrc(even_files[i])
                 tomo_odd, _ = read_mrc(odd_files[i])
-                write_mrc(f'{full}/{os.path.splitext(even_files_names[i])[0]}_full.mrc',tomo_odd+tomo_even, voxel_size=voxel_size)
-            return full
+                write_mrc(f'{average}/{os.path.splitext(even_files_names[i])[0]}_full.mrc',tomo_odd+tomo_even, voxel_size=voxel_size)
+            return average
+        
         if full in ["None",None] and create_average:
-            logging.info("creating average from even odd tomograms ")
+            logging.info("Creating average from even/odd tomograms ")
             full = create_average_func(even, odd)
         
         # tomograms setup
@@ -144,7 +131,7 @@ class ISONET:
 
 
         # voxel_size
-        if pixel_size in ["auto","None"]:
+        if pixel_size in ["None", None, "auto"]:
             voxel_size_list = []
             counted_files_names = sorted(os.listdir(count_folder))
             counted_files = [f"{count_folder}/{item}" for item in counted_files_names]        
@@ -171,6 +158,8 @@ class ISONET:
 
         # subtomogram coordinates
         add_param(coordinate_folder, 'rlnBoxFile', "None")
+        if number_subtomos in [None, "None","auto"]:
+            number_subtomos = 3000/num_tomo
         if coordinate_folder not in ["None", None]:
             number_subtomos = "None"
             logging.info("the number of subtomogram for each tomogram will be determined by the subtomogram coordinate files")
@@ -325,7 +314,6 @@ class ISONET:
                 surface=z_crop/2
             )
             new_star.at[i, 'rlnMaskName'] = out_path
-            return f"{os.path.relpath(tomo)} → {out_path}"
 
         logging.info("Generating masks for tomograms")
         process_tomograms(
@@ -375,7 +363,7 @@ class ISONET:
             do_phaseflip_input = True
 
         all_tomo_paths = []
-        def predict_row(i, row, new_star, pbar):
+        def predict_row(i, row, new_star):
             # 1) Build missing‑wedge mask if requested
             F_mask = (
                 mw3D(cube_size, missingAngle=[
@@ -412,10 +400,7 @@ class ISONET:
                 ]
             base = os.path.splitext(os.path.basename(tomo_paths[0]))[0]
             prefix = f"{output_dir}/{output_prefix}_{network.method}_{network.arch}_{base}"
-            out_file = f"{prefix}.mrc"
-            pbar_postfix = f"{[os.path.relpath(p) for p in tomo_paths]} → {out_file}"
-            pbar.set_postfix_str(pbar_postfix)
-
+            
             out_data = []
             for tomo_p in tomo_paths:
                 tomo_vol, _ = read_mrc(tomo_p)
@@ -437,6 +422,7 @@ class ISONET:
 
             out_data = sum(out_data) / len(out_data)
 
+            out_file = f"{prefix}.mrc"
             write_mrc(out_file, out_data.astype(np.float32) * -1)
             all_tomo_paths.append(out_file)
 
@@ -445,6 +431,7 @@ class ISONET:
             column = "rlnDenoisedTomoName" if network.method == 'n2n' else "rlnCorrectedTomoName"
             new_star.at[i, column] = out_file   
             save_slices_and_spectrum(out_file,output_dir,'')
+            logging.info(f" Predicted {[os.path.relpath(p) for p in tomo_paths]} → {out_file}")
             
 
         process_tomograms(
@@ -485,8 +472,8 @@ class ISONET:
                    deconvstrength: float=1,
                    highpassnyquist:float=0.02,
 
-                   with_predict: bool=True,
-                   pred_tomo_idx:str=1
+                   with_preview: bool=True,
+                   prev_tomo_idx:str=1
                    ):
         """
         Train denoising model using noise2noise approach.
@@ -516,8 +503,8 @@ class ISONET:
             snrfalloff: SNR falloff parameter. A higher value means less high frequency data.
             deconvstrength: Deconvolution strength parameter. A higher value means stronger deconvolution.
             highpassnyquist: High-pass filter parameter. A higher value means more low frequency data is removed.
-            with_predict: Whether to run prediction after training.
-            pred_tomo_idx: If set, process only the tomograms listed by these indices (e.g., "1,2,4" or "5-10,15,16").
+            with_preview: Whether to run prediction after training.
+            prev_tomo_idx: If set, process only the tomograms listed by these indices (e.g., "1,2,4" or "5-10,15,16").
         """
         acc_batches=1
         create_folder(output_dir,remove=False)
@@ -563,7 +550,7 @@ class ISONET:
         from IsoNet.utils.plot_metrics import save_slices_and_spectrum
         network = Net(method='n2n', arch=arch, cube_size=cube_size, pretrained_model=pretrained_model,state='train')
         network.prepare_train_dataset(training_params)
-        if with_predict:
+        if with_preview:
             new_epochs = save_interval
             training_params["epochs"] = new_epochs
             for step in range(save_interval, epochs+1, save_interval):
@@ -572,7 +559,7 @@ class ISONET:
                 model_file = f"{output_dir}/network_n2n_{arch}_{cube_size}_full.pt"
                 shutil.copy(model_file, f"{output_dir}/network_n2n_{arch}_{cube_size}_epoch{step}_full.pt")
                 all_tomo_paths = self.predict(star_file=star_file, model=model_file, output_dir=output_dir, gpuID=gpuID, \
-                            isCTFflipped=isCTFflipped, tomo_idx=pred_tomo_idx,output_prefix=f"corrected_epochs{step}") 
+                            isCTFflipped=isCTFflipped, tomo_idx=prev_tomo_idx,output_prefix=f"corrected_epochs{step}") 
                 save_slices_and_spectrum(all_tomo_paths[0],output_dir,step)
         else:
             network.train(training_params) #train based on init model and save new one as model_iter{num_iter}.h5
@@ -615,8 +602,8 @@ class ISONET:
 
                    random_rot_weight: float=0.2,
 
-                   with_predict: bool=True,
-                   pred_tomo_idx:str=1,
+                   with_preview: bool=True,
+                   prev_tomo_idx:str=1,
 
                    snrfalloff: float=0,
                    deconvstrength: float=1,
@@ -658,8 +645,8 @@ class ISONET:
             noise_level: Noise level to add during training.
             noise_mode: Noise generation mode (None, ramp, hamming).
             random_rot_weight: Percentage of rotations applied as random augmentation.
-            with_predict: Whether to run prediction every save interval.
-            pred_tomo_idx: If set, automatically predict only the tomograms listed by these indices (e.g., "1,2,4" or "5-10,15,16").
+            with_preview: Whether to run prediction every save interval.
+            prev_tomo_idx: If set, automatically predict only the tomograms listed by these indices (e.g., "1,2,4" or "5-10,15,16").
             snrfalloff: SNR falloff parameter.
             deconvstrength: Deconvolution strength parameter.
             highpassnyquist: High-pass filter parameter.
@@ -769,7 +756,7 @@ class ISONET:
         from IsoNet.models.network import Net
         network = Net(method=method, arch=arch, cube_size=cube_size, pretrained_model=pretrained_model,state='train')
         network.prepare_train_dataset(training_params)
-        if with_predict:
+        if with_preview:
             new_epochs = save_interval
             training_params["epochs"] = new_epochs
             for step in range(save_interval, epochs+1, save_interval):
@@ -788,7 +775,7 @@ class ISONET:
                     num_mask_updates -= 1
                 else:
                     all_tomo_paths = self.predict(star_file=star_file, model=model_file, output_dir=output_dir, gpuID=gpuID, \
-                                isCTFflipped=isCTFflipped, tomo_idx=pred_tomo_idx,output_prefix=f"corrected_epochs{step}")
+                                isCTFflipped=isCTFflipped, tomo_idx=prev_tomo_idx,output_prefix=f"corrected_epochs{step}")
                 save_slices_and_spectrum(all_tomo_paths[0],output_dir,step)
         else:
             network.train(training_params) #train based on init model and save new one as model_iter{num_iter}.h5
@@ -822,7 +809,7 @@ class ISONET:
     #     noise_mode: str = 'noFilter',
     #     noise_start_iter: tuple = (10,15,20,25),
 
-    #     with_predict: bool = True,
+    #     with_preview: bool = True,
 
     #     # temporarily fixed parameters
     #     normalize_percentile: bool = True,
@@ -889,7 +876,7 @@ class ISONET:
     #     from IsoNet.bin.refine import run
     #     run(params)
 
-    #     # if with_predict:
+    #     # if with_preview:
     #         # self.predict(star_file, params['])
 
 
